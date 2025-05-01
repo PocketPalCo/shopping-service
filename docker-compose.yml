@@ -1,0 +1,14 @@
+services:
+  postgres:
+    container_name: shopping-service-db
+    image: "postgres"
+    environment:
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+      POSTGRES_DB: "pocket-pal"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-datavolume:/var/lib/postgresql/data
+volumes:
+  postgres-datavolume:
