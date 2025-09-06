@@ -1,0 +1,45 @@
+🤖 <b>PocketPal Shopping Bot - Help</b>
+
+{{if .IsAuthorized}}
+<b>📋 Available Commands:</b>
+
+🏠 /start - Welcome message and bot status
+❓ /help - Show this help message
+📊 /status - Check your authorization status
+🆔 /myid - Get your Telegram ID
+
+{{if .IsAdmin}}
+<b>👑 Admin Commands:</b>
+👥 /users - List all authorized users
+🔐 /authorize @username - Authorize a user
+🚫 /revoke @username - Revoke user authorization
+
+<b>👨‍👩‍👧‍👦 Family Management (Admin Only):</b>
+🏠 /createfamily &lt;name&gt; [description] - Create a new family
+👤 /addfamilymember &lt;family_name&gt; &lt;@username|telegram_id&gt; - Add member to family
+{{end}}
+
+<b>👨‍👩‍👧‍👦 Family Features:</b>
+🏘️ /families - View your families and their details
+
+<b>🛒 Shopping Features:</b>
+📝 /lists - View and manage your shopping lists
+➕ /createlist - Create a new shopping list for your family
+
+<b>ℹ️ How Authorization Works:</b>
+When new users start the bot, administrators are automatically notified with easy approval buttons. No manual checking required!
+{{else}}
+<b>⏳ Authorization Required</b>
+
+You need to be authorized to use this bot. When you started the bot with /start, administrators were automatically notified about your request.
+
+<b>📋 Available Commands (Unauthorized):</b>
+
+🏠 /start - Welcome message and authorization request
+❓ /help - Show this help message  
+🆔 /myid - Get your Telegram ID
+
+Once authorized, you'll have access to shopping list features and more commands!
+{{end}}
+
+Need assistance? Contact the bot administrator.

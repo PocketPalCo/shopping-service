@@ -29,9 +29,16 @@ func NewLogger(cfg *config.Config) *slog.Logger {
 	//}(logFile)
 
 	mw := io.MultiWriter(os.Stdout, logFile)
-	handler := slog.NewJSONHandler(mw, &slog.HandlerOptions{
-		Level: cfg.LogLevel,
-	})
+	var handler slog.Handler
+	if cfg.LogFormat == "json" {
+		handler = slog.NewJSONHandler(mw, &slog.HandlerOptions{
+			Level: cfg.GetSlogLevel(),
+		})
+	} else {
+		handler = slog.NewTextHandler(mw, &slog.HandlerOptions{
+			Level: cfg.GetSlogLevel(),
+		})
+	}
 	logger := slog.New(handler).With("env", cfg.Environment)
 
 	return logger

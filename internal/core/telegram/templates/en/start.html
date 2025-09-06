@@ -1,0 +1,17 @@
+🎉 <b>Welcome to PocketPal Shopping Bot!</b>
+
+Hi {{.FirstName}}! I'm your personal shopping assistant.
+
+{{if .IsAuthorized}}
+✅ <b>You're authorized!</b> You can use all bot features.
+
+Use /help to see available commands.
+{{else}}
+⏳ <b>Authorization Required</b>
+
+I've notified the administrators about your request to use this bot. You'll receive a message once you're authorized.
+
+Meanwhile, you can use /help to see what I can do once you're approved!
+{{end}}
+
+Happy shopping! 🛒

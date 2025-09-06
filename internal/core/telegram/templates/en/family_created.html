@@ -1,0 +1,11 @@
+✅ <b>Family Created Successfully!</b>
+
+🏠 <b>Name:</b> {{.Name}}
+{{if .Description}}📝 <b>Description:</b> {{.Description}}{{end}}
+👑 <b>Your Role:</b> Admin
+📅 <b>Created:</b> {{.CreatedAt.Format "2006-01-02 15:04:05"}}
+
+You can now add members to your family using:
+<code>/addfamilymember {{.Name}} &lt;username_or_telegram_id&gt;</code>
+
+Use /families to see all your families.

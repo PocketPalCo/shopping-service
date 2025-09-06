@@ -1,0 +1,36 @@
+## Standard Categories and Subcategories:
+
+### dairy
+- milk, yogurt, cheese, butter, cream, cottage_cheese, sour_cream
+
+### meat
+- chicken, beef, pork, lamb, turkey, fish, seafood, sausage, ham
+
+### produce  
+- fruits: apple, banana, orange, berries, grapes
+- vegetables: carrot, onion, potato, tomato, lettuce, cucumber
+
+### pantry
+- rice, pasta, flour, sugar, salt, oil, vinegar, spices, canned_goods
+
+### beverages
+- water, juice, soda, coffee, tea, alcohol, milk_alternatives
+
+### bakery
+- bread, rolls, bagels, pastry, cake, cookies
+
+### household
+- cleaning_supplies, paper_products, personal_care, laundry
+
+### frozen
+- frozen_vegetables, frozen_meals, ice_cream, frozen_meat
+
+### snacks
+- chips, crackers, nuts, candy, chocolate
+
+## Quantity Units:
+Common units to recognize and standardize:
+- Weight: kg, g, lb, oz
+- Volume: L, ml, cup, pint, gallon
+- Count: pieces, pack, box, bottle, can, bag
+- Length: cm, inch (for items like aluminum foil)

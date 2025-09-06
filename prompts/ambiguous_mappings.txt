@@ -1,0 +1,32 @@
+## Ambiguous Items and Context-Based Mappings:
+
+### High Ambiguity Cases (confidence < 0.8):
+These items require contextual inference and should have lower confidence scores:
+
+- "raw" → likely "milk" (dairy context)
+- "green" → likely "lettuce" or "herbs" (produce context)  
+- "white" → could be "rice", "bread", "milk" (context dependent)
+- "red" → likely "tomatoes", "apples", or "meat" (context dependent)
+- "big" → needs additional context
+- "small" → needs additional context
+- "fresh" → modifier, extract the actual item
+
+### Common Abbreviations:
+- "choc" → "chocolate"
+- "veggies" → "vegetables" 
+- "fruits" → "mixed fruits"
+- "meat" → "beef" (default assumption)
+- "fish" → "fish" (seafood category)
+
+### Context Clues:
+When items are ambiguous, use these strategies:
+1. Look for quantity units (2L suggests liquid like milk)
+2. Consider common shopping patterns
+3. Use lower confidence scores (0.6-0.8) for ambiguous items
+4. Default to most common interpretation
+
+### Multi-word Items:
+- "olive oil" → {"standardized_name": "olive oil", "category": "pantry", "subcategory": "oil"}
+- "ice cream" → {"standardized_name": "ice cream", "category": "frozen", "subcategory": "dessert"}
+- "toilet paper" → {"standardized_name": "toilet paper", "category": "household", "subcategory": "paper_products"}
+- "washing powder" → {"standardized_name": "washing powder", "category": "household", "subcategory": "laundry"}

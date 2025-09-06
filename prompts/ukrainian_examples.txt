@@ -1,0 +1,22 @@
+## Ukrainian Language Examples (uk):
+
+### Basic Items:
+- "молоко" → {"standardized_name": "молоко", "category": "dairy", "subcategory": "milk", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "хліб" → {"standardized_name": "хліб", "category": "bakery", "subcategory": "bread", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "яблука" → {"standardized_name": "яблука", "category": "produce", "subcategory": "fruits", "quantity_unit": "pieces", "confidence_score": 0.95}
+
+### With Quantities:
+- "молоко 1л" → {"standardized_name": "молоко", "category": "dairy", "subcategory": "milk", "quantity_value": 1.0, "quantity_unit": "L", "confidence_score": 0.95}
+- "курка 2кг" → {"standardized_name": "курка", "category": "meat", "subcategory": "chicken", "quantity_value": 2.0, "quantity_unit": "kg", "confidence_score": 0.95}
+- "м'ясо (500г)" → {"standardized_name": "м'ясо", "category": "meat", "subcategory": "beef", "quantity_value": 500.0, "quantity_unit": "g", "confidence_score": 0.9}
+
+### Common Variations:
+- "кава" → {"standardized_name": "кава", "category": "beverages", "subcategory": "coffee", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "помідори" → {"standardized_name": "помідори", "category": "produce", "subcategory": "vegetables", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "сир" → {"standardized_name": "сир", "category": "dairy", "subcategory": "cheese", "quantity_unit": "pieces", "confidence_score": 0.95}
+
+### Ukrainian Specific Terms:
+- "сметана" → {"standardized_name": "сметана", "category": "dairy", "subcategory": "sour_cream", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "ковбаса" → {"standardized_name": "ковбаса", "category": "meat", "subcategory": "sausage", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "цибуля" → {"standardized_name": "цибуля", "category": "produce", "subcategory": "vegetables", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "картопля" → {"standardized_name": "картопля", "category": "produce", "subcategory": "vegetables", "quantity_unit": "pieces", "confidence_score": 0.95}

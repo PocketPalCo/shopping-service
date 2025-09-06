@@ -1,0 +1,12 @@
+## Current Task:
+Input item: "{raw_text}"
+Language: {language_code}
+
+Please analyze this item and respond with the JSON structure as specified above. Consider:
+1. The original language should be preserved in standardized_name
+2. Categories and subcategories should be in English
+3. Extract quantity information if present
+4. Handle common typos and variations
+5. Use appropriate confidence score based on ambiguity level
+
+Remember to respond ONLY with valid JSON - no additional text or formatting.

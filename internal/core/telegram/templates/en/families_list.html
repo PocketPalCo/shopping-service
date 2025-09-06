@@ -1,0 +1,16 @@
+{{if .Families}}
+<b>👨‍👩‍👧‍👦 Your Families:</b>
+
+{{range .Families}}
+🏠 <b>{{.Name}}</b>
+{{if .Description}}   📝 {{.Description}}{{end}}
+   👥 Members: {{.MemberCount}}
+   👑 Role: {{.Role}}
+
+{{end}}
+Use /createfamily to create a new family or /addfamilymember to add members to your families.
+{{else}}
+👨‍👩‍👧‍👦 <b>No families found</b>
+
+You're not a member of any families yet. Ask an admin to create a family and add you, or create your own family using /createfamily.
+{{end}}

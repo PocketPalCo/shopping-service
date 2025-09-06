@@ -1,0 +1,14 @@
+👥 <b>Авторизованные пользователи</b>
+
+{{if .Users}}
+<b>Всего: {{len .Users}} пользователей</b>
+
+{{range .Users}}
+• {{.FirstName}}{{if .LastName}} {{.LastName}}{{end}} {{if .Username}}(@{{.Username}}){{end}}
+  ID: <code>{{.TelegramID}}</code>
+  {{if .AuthorizedAt}}Авторизован: {{.AuthorizedAt.Format "2006-01-02"}}{{end}}
+
+{{end}}
+{{else}}
+Авторизованных пользователей не найдено.
+{{end}}

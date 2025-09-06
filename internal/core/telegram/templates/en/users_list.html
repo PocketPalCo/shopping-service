@@ -1,0 +1,14 @@
+👥 <b>Authorized Users</b>
+
+{{if .Users}}
+<b>Total: {{len .Users}} users</b>
+
+{{range .Users}}
+• {{.FirstName}}{{if .LastName}} {{.LastName}}{{end}} {{if .Username}}(@{{.Username}}){{end}}
+  ID: <code>{{.TelegramID}}</code>
+  {{if .AuthorizedAt}}Authorized: {{.AuthorizedAt.Format "2006-01-02"}}{{end}}
+
+{{end}}
+{{else}}
+No authorized users found.
+{{end}}

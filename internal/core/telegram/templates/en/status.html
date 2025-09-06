@@ -1,0 +1,17 @@
+📊 <b>Your Account Status</b>
+
+👤 <b>User Information:</b>
+• Name: {{.FirstName}}{{if .LastName}} {{.LastName}}{{end}}
+• Username: {{if .Username}}@{{.Username}}{{else}}<i>No username set</i>{{end}}
+• Telegram ID: <code>{{.TelegramID}}</code>
+
+{{if .IsAuthorized}}
+✅ <b>Status: Authorized</b>
+{{if .AuthorizedAt}}• Authorized on: {{.AuthorizedAt.Format "2006-01-02 15:04:05"}}{{end}}
+
+You have full access to all bot features! 🎉
+{{else}}
+⏳ <b>Status: Pending Authorization</b>
+
+You need administrator approval to use this bot. If you just started using the bot, administrators have been automatically notified.
+{{end}}

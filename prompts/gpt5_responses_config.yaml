@@ -1,0 +1,123 @@
+# GPT-5 Responses API Configuration
+# This configuration uses OpenAI's new Responses API with GPT-5 for improved reasoning and performance
+
+# OpenAI Configuration for Responses API
+openai:
+  api_key: "${OPENAI_API_KEY}"
+  model: "gpt-5-nano"  # or "gpt-5" for full model
+  base_url: "https://api.openai.com/v1"
+  max_tokens: 300
+  temperature: 0.1  # Low temperature for consistent parsing
+  use_responses_api: true  # Use new Responses API instead of Chat Completions
+  store: true  # Enable stateful context for better reasoning
+  reasoning_effort: "medium"  # "low", "medium", "high" for GPT-5 reasoning
+
+# Alternative configurations for different use cases
+configurations:
+  # High accuracy for critical parsing
+  high_accuracy:
+    model: "gpt-5"
+    reasoning_effort: "high"
+    temperature: 0.05
+    max_tokens: 500
+    store: true
+    
+  # Fast parsing for high volume
+  fast_parsing:
+    model: "gpt-5-nano"
+    reasoning_effort: "low"
+    temperature: 0.1
+    max_tokens: 200
+    store: false
+    
+  # Balanced performance (recommended)
+  balanced:
+    model: "gpt-5-nano"
+    reasoning_effort: "medium"
+    temperature: 0.1
+    max_tokens: 300
+    store: true
+
+# Fallback configuration (Chat Completions API)
+fallback:
+  openai:
+    model: "gpt-4o"
+    use_responses_api: false  # Fall back to Chat Completions
+    temperature: 0.1
+    max_tokens: 300
+
+# AI Provider Selection
+ai:
+  provider: "openai"  # "mock", "openai"
+  prompts_dir: "./prompts"
+  
+  # Configuration per environment
+  environments:
+    production:
+      provider: "openai"
+      config: "high_accuracy"
+    staging:
+      provider: "openai" 
+      config: "balanced"
+    development:
+      provider: "mock"
+      
+# Performance and Cost Settings
+performance:
+  # Cache responses to reduce API calls
+  cache_enabled: true
+  cache_ttl: "24h"
+  
+  # Concurrent request limits
+  max_concurrent: 10
+  rate_limit: "100/minute"
+  
+  # Retry configuration
+  retry_attempts: 3
+  retry_delay: "2s"
+  
+  # Cost optimization
+  use_cached_reasoning: true  # 40-80% cost reduction
+  batch_requests: true  # Process multiple items together when possible
+
+# Quality Assurance
+quality:
+  min_confidence_threshold: 0.6
+  log_low_confidence: true
+  human_review_threshold: 0.4  # Items below this need human review
+  
+  # Validation rules
+  required_fields: ["standardized_name", "category", "confidence_score"]
+  category_whitelist: ["dairy", "meat", "produce", "pantry", "beverages", "bakery", "household", "frozen", "snacks"]
+  
+# Monitoring and Analytics
+monitoring:
+  log_requests: true
+  log_responses: false  # Enable for debugging
+  track_reasoning: true  # Track reasoning summaries from GPT-5
+  
+  # Metrics to track
+  metrics:
+    - accuracy_by_language
+    - confidence_distribution  
+    - processing_time
+    - cost_per_request
+    - reasoning_effectiveness
+    
+  # Alerts
+  alerts:
+    low_accuracy: 0.85
+    high_latency: "5s"
+    high_cost: "$0.01"
+
+# Language-specific settings
+languages:
+  en:
+    confidence_boost: 0.1  # English typically has higher accuracy
+    examples_weight: 1.0
+  ru:
+    confidence_boost: 0.0
+    examples_weight: 1.2  # More examples for better accuracy
+  uk:
+    confidence_boost: 0.0
+    examples_weight: 1.2

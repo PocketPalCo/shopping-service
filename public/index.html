@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PocketPal Shopping Service</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .status-badge {
+            display: inline-block;
+            background: #27ae60;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        .endpoint-list {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .endpoint {
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+        }
+        .method {
+            background: #007bff;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-right: 10px;
+        }
+        .bot-info {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛒 PocketPal Shopping Service <span class="status-badge">RUNNING</span></h1>
+        
+        <p>Welcome to the PocketPal Shopping Service! This service provides both HTTP API endpoints and Telegram bot integration for managing shopping lists.</p>
+
+        <h2>📊 Monitoring Endpoints</h2>
+        <div class="endpoint-list">
+            <div class="endpoint">
+                <span class="method">GET</span><strong>/health</strong> - Health check endpoint
+            </div>
+            <div class="endpoint">
+                <span class="method">GET</span><strong>/metrics</strong> - Prometheus metrics
+            </div>
+        </div>
+
+        <h2>🔌 API Endpoints</h2>
+        <div class="endpoint-list">
+            <div class="endpoint">
+                <span class="method">GET</span><strong>/v1/list</strong> - Get shopping list items
+            </div>
+            <div class="endpoint">
+                <span class="method">GET</span><strong>/v1/test</strong> - Database connectivity test
+            </div>
+        </div>
+
+        <h2>🤖 Telegram Bot Integration</h2>
+        <div class="bot-info">
+            <p><strong>Bot Features:</strong></p>
+            <ul>
+                <li>User authorization system</li>
+                <li>Admin commands for user management</li>
+                <li>Session management with auto-cleanup</li>
+                <li>Shopping list integration (coming soon)</li>
+            </ul>
+            <p>See <code>TELEGRAM_SETUP.md</code> for setup instructions.</p>
+        </div>
+
+        <h2>🏗️ Architecture</h2>
+        <ul>
+            <li><strong>Clean Architecture</strong> with separated concerns</li>
+            <li><strong>PostgreSQL</strong> database with migrations</li>
+            <li><strong>Redis</strong> caching support</li>
+            <li><strong>OpenTelemetry</strong> observability (metrics & tracing)</li>
+            <li><strong>Structured logging</strong> with slog</li>
+            <li><strong>Graceful shutdown</strong> handling</li>
+        </ul>
+
+        <h2>🔧 Development</h2>
+        <p>For development commands and setup, see the project <code>Makefile</code> and <code>CLAUDE.md</code>.</p>
+
+        <hr>
+        <footer style="text-align: center; color: #666; margin-top: 30px;">
+            <p>PocketPal Shopping Service - Clean Architecture Template</p>
+        </footer>
+    </div>
+</body>
+</html>

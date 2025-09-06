@@ -2,135 +2,72 @@ package main
 
 import (
 	"context"
-	"errors"
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/PocketPalCo/shopping-service/config"
 	"github.com/PocketPalCo/shopping-service/internal/infra/postgres"
+	"github.com/PocketPalCo/shopping-service/internal/infra/server"
 	"github.com/PocketPalCo/shopping-service/pkg/logger"
-	"github.com/PocketPalCo/shopping-service/pkg/telemetry"
-	"github.com/gofiber/contrib/otelfiber/v2"
-	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
-	api "go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/resource"
-	semconv "go.opentelemetry.io/otel/semconv/v1.9.0"
-	"google.golang.org/grpc"
 	"log/slog"
-	"os"
-	"time"
-)
-
-var (
-	httpRequestsCounter  api.Int64Counter
-	httpRequestHistogram api.Float64Histogram
 )
 
 func main() {
-	mainContext := context.Background()
+	ctx := context.Background()
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		slog.Error("failed to load config", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 
+	// Initialize standard logger (OTLP logging temporarily disabled due to version conflicts)
 	defaultLogger := logger.NewLogger(&cfg)
 	slog.SetDefault(defaultLogger)
 
-	conn, err := postgres.Init(cfg)
+	slog.Info("Starting shopping service",
+		"component", "main",
+		"environment", cfg.Environment,
+		"server_address", cfg.ServerAddress,
+		"log_level", cfg.LogLevel,
+		"db_host", cfg.DbHost,
+		"db_port", cfg.DbPort)
+
+	conn, err := postgres.Init(&cfg)
 	if err != nil {
-		slog.Error("failed to connect to database", slog.String("error", err.Error()))
+		slog.Error("Failed to connect to database",
+			"component", "database",
+			"error", err.Error(),
+			"db_host", cfg.DbHost,
+			"db_port", cfg.DbPort,
+			"db_name", cfg.DbDatabaseName)
 		os.Exit(1)
 	}
 
-	metricExporter, err := otlpmetricgrpc.New(mainContext,
-		otlpmetricgrpc.WithEndpoint(cfg.OtlpEndpoint),
-		otlpmetricgrpc.WithInsecure(),
-		otlpmetricgrpc.WithDialOption(grpc.WithUserAgent("shopping-service")),
-	)
-	if err != nil {
-		slog.Error("failed to initialize otlp exporter", slog.String("error", err.Error()))
+	slog.Info("Database connection established",
+		"component", "database",
+		"db_host", cfg.DbHost,
+		"db_port", cfg.DbPort,
+		"db_name", cfg.DbDatabaseName,
+		"max_connections", cfg.DbMaxConnections)
+
+	mainServer := server.New(ctx, &cfg, conn)
+	if mainServer == nil {
+		slog.Error("Failed to create server", "component", "server")
 		os.Exit(1)
 	}
 
-	provider := metric.NewMeterProvider(metric.WithResource(resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceNameKey.String("shopping-service"),
-	)), metric.WithReader(metric.NewPeriodicReader(metricExporter, metric.WithInterval(15*time.Second))))
+	slog.Info("Starting server", "component", "server")
+	go mainServer.Start()
 
-	defer func() {
-		if err := provider.Shutdown(mainContext); err != nil {
-			slog.Error("failed to shutdown metric provider", slog.String("error", err.Error()))
-		}
-	}()
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, syscall.SIGINT, syscall.SIGTERM)
 
-	err = telemetry.InitTelemetry(provider, conn)
-	if err != nil {
-		slog.Error("failed to initialize telemetry", slog.String("error", err.Error()))
-		os.Exit(1)
-	}
+	slog.Info("Server ready, waiting for shutdown signal", "component", "main")
+	<-interrupt
 
-	instrumentedConn, err := telemetry.NewInstrumentedPool(provider, conn)
-	if err != nil {
-		slog.Error("failed to create instrumented pool", slog.String("error", err.Error()))
-	}
-
-	slog.Info("Starting server", slog.String("address", cfg.ServerAddress))
-
-	app := fiber.New()
-	app.Use(otelfiber.Middleware())
-
-	app.Get("/error", func(ctx *fiber.Ctx) error {
-		return errors.New("abc")
-	})
-
-	meter := provider.Meter("http")
-	httpRequestsCounter, _ = meter.Int64Counter("http_requests_total", api.WithDescription("Total number of HTTP requests."))
-
-	httpRequestHistogram, _ = meter.Float64Histogram("http_request_duration_ms", api.WithDescription("Duration of HTTP requests in milliseconds."))
-	app.Get("/list", func(c *fiber.Ctx) error {
-		start := time.Now()
-
-		err := c.Next()
-
-		durationMs := float64(time.Since(start).Milliseconds())
-
-		httpRequestsCounter.Add(c.UserContext(), 1,
-			api.WithAttributes(
-				attribute.String("method", c.Method()),
-				attribute.String("path", c.Route().Path),
-				attribute.Int("status_code", c.Response().StatusCode()),
-			),
-		)
-
-		var id uuid.UUID
-		var name string
-		err = instrumentedConn.QueryRow(mainContext, "select id, name from shopping_list_items").Scan(&id, &name)
-		if err != nil {
-			slog.Error("failed to query database", slog.String("error", err.Error()))
-		}
-
-		httpRequestHistogram.Record(c.UserContext(), durationMs,
-			api.WithAttributes(
-				attribute.String("method", c.Method()),
-				attribute.String("path", c.Route().Path),
-				attribute.Int("status_code", c.Response().StatusCode()),
-			),
-		)
-
-		return c.JSON(fiber.Map{"id": id, "name": name})
-	})
-
-	err = app.Listen(":8080")
-	if err != nil {
-		return
-	}
-
-}
-
-type ListItems struct {
-	Id   uuid.UUID
-	Name string
-	Done bool
+	slog.Info("Shutdown signal received, stopping server", "component", "main")
+	mainServer.Shutdown()
+	conn.Close()
+	slog.Info("Service shutdown complete", "component", "main")
 }

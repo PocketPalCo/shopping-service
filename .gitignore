@@ -92,3 +92,5 @@ fabric.properties
 pkg/config/config.yaml
 vendor/
 docker-compose.yml
+
+.env

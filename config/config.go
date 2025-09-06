@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -13,14 +15,14 @@ import (
 )
 
 type Config struct {
-	Environment       string     `mapstructure:"SSV_ENVIRONMENT"`
-	ServerName        string     `mapstructure:"SSV_SERVER_NAME"`
-	ServerAddress     string     `mapstructure:"SSV_SERVER_BIND_ADDR"`
-	ServerReadTimeout int16      `mapstructure:"SSV_SERVER_READ_TIMEOUT"`
-	LogFormat         string     `mapstructure:"SSV_LOG_FORMAT"` // text or json
-	LogLevel          slog.Level `mapstructure:"SSV_LOG_LEVEL"`  // debug, info, warn, error
-	RateLimitMax      int        `mapstructure:"SSV_RATE_LIMIT_MAX"`
-	RateLimitWindow   int        `mapstructure:"SSV_RATE_LIMIT_WINDOW"`
+	Environment       string `mapstructure:"SSV_ENVIRONMENT"`
+	ServerName        string `mapstructure:"SSV_SERVER_NAME"`
+	ServerAddress     string `mapstructure:"SSV_SERVER_BIND_ADDR"`
+	ServerReadTimeout int16  `mapstructure:"SSV_SERVER_READ_TIMEOUT"`
+	LogFormat         string `mapstructure:"SSV_LOG_FORMAT"` // text or json
+	LogLevel          string `mapstructure:"SSV_LOG_LEVEL"`  // debug, info, warn, error
+	RateLimitMax      int    `mapstructure:"SSV_RATE_LIMIT_MAX"`
+	RateLimitWindow   int    `mapstructure:"SSV_RATE_LIMIT_WINDOW"`
 
 	DbHost           string `mapstructure:"SSV_DB_HOST"`
 	DbPort           int16  `mapstructure:"SSV_DB_PORT"`
@@ -30,7 +32,33 @@ type Config struct {
 	DbDatabaseName   string `mapstructure:"SSV_DB_DATABASE"`
 	DbMaxConnections int    `mapstructure:"SSV_DB_MAX_CONNECTIONS"`
 
-	OtlpEndpoint string `mapstructure:"SSV_OTLP_ENDPOINT"`
+	//swagger
+	SwaggerHost string `mapstructure:"SSV_SWAGGER_HOST"`
+
+	// Redis
+	RedisHost string `mapstructure:"SSV_REDIS_HOST"`
+	RedisPort int16  `mapstructure:"SSV_REDIS_PORT"`
+	RedisDb   int    `mapstructure:"SSV_REDIS_DB"`
+	RedisUser string `mapstructure:"SSV_REDIS_USER"`
+	RedisPass string `mapstructure:"SSV_REDIS_PASS"`
+
+	OtlpEndpoint   string `mapstructure:"SSV_OTLP_ENDPOINT"`
+	JaegerEndpoint string `mapstructure:"SSV_JAEGER_ENDPOINT"`
+
+	// Telegram Bot Configuration
+	TelegramBotToken string `mapstructure:"SSV_TELEGRAM_BOT_TOKEN"`
+	TelegramDebug    bool   `mapstructure:"SSV_TELEGRAM_DEBUG"`
+	TelegramAdmins   string `mapstructure:"SSV_TELEGRAM_ADMINS"` // Comma-separated list of Telegram IDs
+
+	// OpenAI Configuration
+	OpenAIAPIKey          string  `mapstructure:"SSV_OPENAI_API_KEY"`
+	OpenAIModel           string  `mapstructure:"SSV_OPENAI_MODEL"`
+	OpenAIBaseURL         string  `mapstructure:"SSV_OPENAI_BASE_URL"`
+	OpenAIMaxTokens       int     `mapstructure:"SSV_OPENAI_MAX_TOKENS"`
+	OpenAITemperature     float64 `mapstructure:"SSV_OPENAI_TEMPERATURE"`
+	OpenAIUseResponsesAPI bool    `mapstructure:"SSV_OPENAI_USE_RESPONSES_API"`
+	OpenAIStore           bool    `mapstructure:"SSV_OPENAI_STORE"`
+	OpenAIReasoningEffort string  `mapstructure:"SSV_OPENAI_REASONING_EFFORT"`
 }
 
 // DefaultConfig generates a config with sane defaults.
@@ -41,7 +69,7 @@ func DefaultConfig() Config {
 		ServerAddress:     "0.0.0.0:3001",
 		ServerReadTimeout: 60,
 		LogFormat:         "text",
-		LogLevel:          slog.LevelInfo,
+		LogLevel:          "info",
 		RateLimitMax:      100,
 		RateLimitWindow:   30,
 
@@ -53,7 +81,32 @@ func DefaultConfig() Config {
 		DbDatabaseName:   "pocket-pal",
 		DbMaxConnections: 100,
 
-		OtlpEndpoint: "localhost:4317",
+		// Swagger
+		SwaggerHost: "localhost:3001",
+
+		// Redis
+		RedisHost: "localhost",
+		RedisPort: 6379,
+		RedisDb:   0,
+		RedisUser: "redis",
+		RedisPass: "redis",
+
+		OtlpEndpoint:   "localhost:4317",
+		JaegerEndpoint: "http://localhost:14268/api/traces",
+
+		TelegramBotToken: "",
+		TelegramDebug:    false,
+		TelegramAdmins:   "",
+
+		// OpenAI defaults
+		OpenAIAPIKey:          "",
+		OpenAIModel:           "gpt-5-nano",
+		OpenAIBaseURL:         "https://api.openai.com/v1",
+		OpenAIMaxTokens:       300,
+		OpenAITemperature:     0.1,
+		OpenAIUseResponsesAPI: true,
+		OpenAIStore:           true,
+		OpenAIReasoningEffort: "medium",
 	}
 }
 
@@ -96,7 +149,25 @@ func ConfigFromEnvironment() (config Config, err error) {
 	viper.SetDefault("SSV_DB_PASSWORD", config.DbPassword)
 	viper.SetDefault("SSV_DB_DATABASE", config.DbDatabaseName)
 	viper.SetDefault("SSV_DB_MAX_CONNECTIONS", config.DbMaxConnections)
+	viper.SetDefault("SSV_SWAGGER_HOST", config.SwaggerHost)
 	viper.SetDefault("SSV_OTLP_ENDPOINT", config.OtlpEndpoint)
+	viper.SetDefault("SSV_JAEGER_ENDPOINT", config.JaegerEndpoint)
+	viper.SetDefault("SSV_REDIS_HOST", config.RedisHost)
+	viper.SetDefault("SSV_REDIS_PORT", config.RedisPort)
+	viper.SetDefault("SSV_REDIS_USER", config.RedisUser)
+	viper.SetDefault("SSV_REDIS_PASS", config.RedisPass)
+	viper.SetDefault("SSV_REDIS_DB", config.RedisDb)
+	viper.SetDefault("SSV_TELEGRAM_BOT_TOKEN", config.TelegramBotToken)
+	viper.SetDefault("SSV_TELEGRAM_DEBUG", config.TelegramDebug)
+	viper.SetDefault("SSV_TELEGRAM_ADMINS", config.TelegramAdmins)
+	viper.SetDefault("SSV_OPENAI_API_KEY", config.OpenAIAPIKey)
+	viper.SetDefault("SSV_OPENAI_MODEL", config.OpenAIModel)
+	viper.SetDefault("SSV_OPENAI_BASE_URL", config.OpenAIBaseURL)
+	viper.SetDefault("SSV_OPENAI_MAX_TOKENS", config.OpenAIMaxTokens)
+	viper.SetDefault("SSV_OPENAI_TEMPERATURE", config.OpenAITemperature)
+	viper.SetDefault("SSV_OPENAI_USE_RESPONSES_API", config.OpenAIUseResponsesAPI)
+	viper.SetDefault("SSV_OPENAI_STORE", config.OpenAIStore)
+	viper.SetDefault("SSV_OPENAI_REASONING_EFFORT", config.OpenAIReasoningEffort)
 
 	// Override config values with environment variables
 	viper.AutomaticEnv()
@@ -139,4 +210,72 @@ func (c Config) Fiber() fiber.Config {
 // DbConnectionString generates a connection string for the database based on config values.
 func (c Config) DbConnectionString() string {
 	return fmt.Sprintf("postgresql://%s:%s@%s:%d/%s?sslmode=%s", c.DbUser, url.QueryEscape(c.DbPassword), c.DbHost, c.DbPort, c.DbDatabaseName, c.DbSSLMode)
+}
+
+// GetSlogLevel converts the string log level to slog.Level.
+func (c Config) GetSlogLevel() slog.Level {
+	switch strings.ToLower(c.LogLevel) {
+	case "debug":
+		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo // default fallback
+	}
+}
+
+// GetTelegramAdmins parses the comma-separated list of Telegram admin IDs.
+func (c Config) GetTelegramAdmins() ([]int64, error) {
+	if c.TelegramAdmins == "" {
+		return []int64{}, nil
+	}
+
+	adminStrings := strings.Split(c.TelegramAdmins, ",")
+	admins := make([]int64, 0, len(adminStrings))
+
+	for _, adminStr := range adminStrings {
+		adminStr = strings.TrimSpace(adminStr)
+		if adminStr == "" {
+			continue
+		}
+
+		adminID, err := strconv.ParseInt(adminStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid admin Telegram ID '%s': %w", adminStr, err)
+		}
+
+		admins = append(admins, adminID)
+	}
+
+	return admins, nil
+}
+
+// GetOpenAIConfig converts config values to OpenAI configuration struct.
+func (c Config) GetOpenAIConfig() OpenAIConfig {
+	return OpenAIConfig{
+		APIKey:          c.OpenAIAPIKey,
+		Model:           c.OpenAIModel,
+		BaseURL:         c.OpenAIBaseURL,
+		MaxTokens:       c.OpenAIMaxTokens,
+		Temperature:     c.OpenAITemperature,
+		UseResponsesAPI: c.OpenAIUseResponsesAPI,
+		Store:           c.OpenAIStore,
+		ReasoningEffort: c.OpenAIReasoningEffort,
+	}
+}
+
+// OpenAIConfig holds OpenAI client configuration
+type OpenAIConfig struct {
+	APIKey          string
+	Model           string // e.g., "gpt-5", "gpt-5-nano"
+	BaseURL         string // for switching to local models later
+	MaxTokens       int
+	Temperature     float64
+	UseResponsesAPI bool   // Use new Responses API instead of Chat Completions
+	Store           bool   // Enable stateful context for better reasoning
+	ReasoningEffort string // "low", "medium", "high" for GPT-5 reasoning
 }

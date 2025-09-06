@@ -1,0 +1,61 @@
+# AI Configuration Examples
+# Copy relevant sections to your main config file
+
+# OpenAI Configuration
+openai:
+  api_key: "${OPENAI_API_KEY}"
+  model: "gpt-3.5-turbo"  # or "gpt-4" for better accuracy
+  base_url: "https://api.openai.com/v1"
+  max_tokens: 300
+  temperature: 0.1
+  timeout: 30s
+
+# Local Llama Configuration (future)
+llama:
+  model_path: "/path/to/llama/model"
+  base_url: "http://localhost:8080/v1"  # Llama.cpp server
+  max_tokens: 300
+  temperature: 0.1
+  timeout: 60s
+
+# Ollama Configuration (alternative local option)
+ollama:
+  base_url: "http://localhost:11434"
+  model: "llama2:7b-chat"
+  max_tokens: 300
+  temperature: 0.1
+
+# AI Provider Selection
+ai:
+  provider: "mock"  # "mock", "openai", "llama", "ollama"
+  prompts_dir: "./prompts"
+  fallback_to_mock: true  # Fallback if primary provider fails
+  
+  # Language-specific provider settings
+  providers_by_language:
+    en: "openai"      # Use OpenAI for English
+    ru: "openai"      # Use OpenAI for Russian  
+    uk: "openai"      # Use OpenAI for Ukrainian
+    default: "mock"   # Default for other languages
+
+# Monitoring and Logging
+ai_monitoring:
+  log_requests: true
+  log_responses: false  # Set to true for debugging
+  track_confidence: true
+  alert_on_low_confidence: 0.5
+  
+# Performance Settings
+ai_performance:
+  cache_results: true
+  cache_ttl: "24h"
+  max_concurrent_requests: 5
+  retry_attempts: 3
+  retry_delay: "1s"
+
+# Quality Settings
+ai_quality:
+  min_confidence_threshold: 0.3  # Reject results below this
+  require_category: true
+  require_standardized_name: true
+  max_item_name_length: 100

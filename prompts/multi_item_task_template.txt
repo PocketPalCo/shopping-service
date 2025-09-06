@@ -1,0 +1,27 @@
+## Multi-Item Parsing Task:
+Input: "{raw_text}"
+Language: {language_code}
+
+Intelligently separate the input into individual items and respond ONLY with a JSON array. Consider:
+1. Split items even without clear separators (e.g., "milk bread eggs" → 3 items)
+2. Handle complex formats like "2 apples and 3 oranges" → 2 items with quantities  
+3. Preserve original language in standardized_name
+4. Categories and subcategories should be in English
+5. Extract individual quantities correctly per item
+6. Handle variations and typos (e.g., "картошечка" → "картошка", "coffe" → "coffee")
+7. Use appropriate confidence scores based on ambiguity level
+
+CRITICAL DECIMAL PARSING EXAMPLES:
+❌ WRONG: "морковка 0,5 кг" → [{"standardized_name": "морковка"}, {"standardized_name": "5 кг"}]
+✅ CORRECT: "морковка 0,5 кг" → [{"standardized_name": "морковка", "quantity_value": 0.5, "quantity_unit": "kg"}]
+
+❌ WRONG: "мука 1,5 кг" → [{"standardized_name": "мука"}, {"standardized_name": "5 кг"}]  
+✅ CORRECT: "мука 1,5 кг" → [{"standardized_name": "мука", "quantity_value": 1.5, "quantity_unit": "kg"}]
+
+Other correct examples:
+- Input: "молоко, сыр, багет" → [{"standardized_name": "молоко"}, {"standardized_name": "сыр"}, {"standardized_name": "багет"}]
+- Input: "мочалки для посуды. овощи- 3 огурца" → [{"standardized_name": "мочалки для посуды"}, {"standardized_name": "огурцы", "quantity_value": 3.0, "quantity_unit": "pieces"}]
+- Input: "хлеб 2 батона и молоко 1л" → [{"standardized_name": "хлеб", "quantity_value": 2.0, "quantity_unit": "pieces"}, {"standardized_name": "молоко", "quantity_value": 1.0, "quantity_unit": "L"}]
+
+Response format: JSON array of items, each with the structure specified above.
+Remember to respond ONLY with the JSON array - no additional text or formatting.
