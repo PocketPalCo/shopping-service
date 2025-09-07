@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/PocketPalCo/shopping-service/internal/core/ai"
 	"github.com/PocketPalCo/shopping-service/internal/core/shopping"
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -15,12 +17,14 @@ import (
 // MessageHandler handles different types of messages
 type MessageHandler struct {
 	BaseHandler
+	stateManager *StateManager
 }
 
 // NewMessageHandler creates a new message handler
-func NewMessageHandler(base BaseHandler) *MessageHandler {
+func NewMessageHandler(base BaseHandler, stateManager *StateManager) *MessageHandler {
 	return &MessageHandler{
-		BaseHandler: base,
+		BaseHandler:  base,
+		stateManager: stateManager,
 	}
 }
 
@@ -175,10 +179,24 @@ func (h *MessageHandler) HandleAddItemInput(ctx context.Context, message *tgbota
 		return
 	}
 
-	// Use AI to intelligently parse and separate multiple items
-	addedItems, failedItems, err := h.shoppingService.AddItemsToListWithAI(ctx, listID, itemText, user.Locale, user.ID)
+	// Check for duplicate items first
+	duplicates, uniqueItems, err := h.shoppingService.CheckDuplicateItems(ctx, listID, itemText, user.Locale, user.ID)
 	if err != nil {
-		h.logger.Error("Failed to add items to list with AI", "error", err)
+		h.logger.Error("Failed to check for duplicate items", "error", err)
+		h.SendMessage(message.Chat.ID, "❌ Failed to process items. Please try again.")
+		return
+	}
+
+	// If there are duplicates, show user choices
+	if len(duplicates) > 0 {
+		h.handleDuplicateItems(ctx, message.Chat.ID, user, duplicates, uniqueItems, listID)
+		return
+	}
+
+	// No duplicates, add unique items directly
+	addedItems, failedItems, err := h.shoppingService.AddParsedItemsToList(ctx, listID, uniqueItems, user.ID)
+	if err != nil {
+		h.logger.Error("Failed to add items to list", "error", err)
 		h.SendMessage(message.Chat.ID, "❌ Failed to add items. Please try again.")
 		return
 	}
@@ -278,4 +296,101 @@ func getUserDisplayName(user *users.User) string {
 		return "@" + *user.Username
 	}
 	return "User_" + strconv.FormatInt(user.TelegramID, 10)
+}
+
+// handleDuplicateItems presents user with choices when duplicate items are detected
+func (h *MessageHandler) handleDuplicateItems(ctx context.Context, chatID int64, user *users.User, duplicates []*shopping.DuplicateItemInfo, uniqueItems []*ai.ParsedResult, listID uuid.UUID) {
+	// Prepare data for template
+	data := struct {
+		Duplicates []*shopping.DuplicateItemInfo
+	}{
+		Duplicates: duplicates,
+	}
+
+	// Render localized message
+	message, err := h.templateManager.RenderTemplate("duplicate_items_found", user.Locale, data)
+	if err != nil {
+		h.logger.Error("Failed to render duplicate items template", "error", err)
+		message = "🔍 <b>Duplicate Items Found!</b>\n\nThe following items are already in your list. Choose what to do:"
+	}
+
+	var buttons [][]tgbotapi.InlineKeyboardButton
+
+	for i := range duplicates {
+		// Create buttons for this duplicate item
+		itemButtons := []tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("keep_existing", user.Locale),
+				fmt.Sprintf("dup_keep_%d_%s", i, listID.String()[:8]),
+			),
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("replace", user.Locale),
+				fmt.Sprintf("dup_replace_%d_%s", i, listID.String()[:8]),
+			),
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("add_both", user.Locale),
+				fmt.Sprintf("dup_both_%d_%s", i, listID.String()[:8]),
+			),
+		}
+		buttons = append(buttons, itemButtons)
+	}
+
+	// Add global action buttons
+	globalButtons := []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData(
+			h.templateManager.RenderButton("keep_all_existing", user.Locale),
+			fmt.Sprintf("dup_keepall_%s", listID.String()[:8]),
+		),
+		tgbotapi.NewInlineKeyboardButtonData(
+			h.templateManager.RenderButton("replace_all", user.Locale),
+			fmt.Sprintf("dup_replaceall_%s", listID.String()[:8]),
+		),
+		tgbotapi.NewInlineKeyboardButtonData(
+			h.templateManager.RenderButton("cancel", user.Locale),
+			fmt.Sprintf("dup_cancel_%s", listID.String()[:8]),
+		),
+	}
+	buttons = append(buttons, globalButtons)
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+	// Store duplicate data in user state for callback handling
+	duplicateState := DuplicateState{
+		ListID:      listID,
+		Duplicates:  make([]*DuplicateItemInfoWithResolution, len(duplicates)),
+		UniqueItems: uniqueItems,
+	}
+
+	// Convert duplicates to include resolution status
+	for i, dup := range duplicates {
+		duplicateState.Duplicates[i] = &DuplicateItemInfoWithResolution{
+			DuplicateItemInfo: dup,
+			Resolved:          false,
+		}
+	}
+
+	// Store state as JSON
+	stateData, err := json.Marshal(duplicateState)
+	if err != nil {
+		h.logger.Error("Failed to marshal duplicate state", "error", err)
+		h.SendMessage(chatID, "❌ Failed to process duplicates. Please try again.")
+		return
+	}
+
+	h.stateManager.SetUserState(user.TelegramID, "duplicate_resolution", string(stateData))
+
+	h.SendMessageWithKeyboard(chatID, message, keyboard)
+}
+
+// DuplicateState represents the stored state for duplicate resolution
+type DuplicateState struct {
+	ListID      uuid.UUID                          `json:"list_id"`
+	Duplicates  []*DuplicateItemInfoWithResolution `json:"duplicates"`
+	UniqueItems []*ai.ParsedResult                 `json:"unique_items"`
+}
+
+// DuplicateItemInfoWithResolution extends DuplicateItemInfo with resolution status
+type DuplicateItemInfoWithResolution struct {
+	*shopping.DuplicateItemInfo
+	Resolved bool `json:"resolved"`
 }

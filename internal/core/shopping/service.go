@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/PocketPalCo/shopping-service/internal/core/ai"
@@ -37,11 +38,20 @@ type ShoppingItem struct {
 	CompletedAt    *time.Time `json:"completed_at" db:"completed_at"`
 	OriginalItemID *uuid.UUID `json:"original_item_id" db:"original_item_id"`
 	ParsedItemID   *uuid.UUID `json:"parsed_item_id" db:"parsed_item_id"`
-	DisplayName    *string    `json:"display_name" db:"display_name"`    // Original user input for display
-	ParsedName     *string    `json:"parsed_name" db:"parsed_name"`      // AI-parsed name for buttons
+	DisplayName    *string    `json:"display_name" db:"display_name"`     // Original user input for display
+	ParsedName     *string    `json:"parsed_name" db:"parsed_name"`       // AI-parsed name for buttons
 	ParsingStatus  string     `json:"parsing_status" db:"parsing_status"` // 'pending', 'parsed', 'failed'
 	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// DuplicateItemInfo contains information about a duplicate item found in the list
+type DuplicateItemInfo struct {
+	NewItemName  string        `json:"new_item_name"`  // Original input text
+	ParsedName   string        `json:"parsed_name"`    // Standardized name
+	ExistingItem *ShoppingItem `json:"existing_item"`  // Existing item in list
+	ParsedItemID uuid.UUID     `json:"parsed_item_id"` // ID from parsed_items table
+	NewQuantity  *string       `json:"new_quantity"`   // Quantity from new input
 }
 
 type CreateShoppingListRequest struct {
@@ -176,7 +186,7 @@ func (s *Service) GetUserShoppingListsWithFamilies(ctx context.Context, userID u
 		JOIN family_members fm ON f.id = fm.family_id
 		WHERE fm.user_id = $1
 	`
-	
+
 	var familyCount int
 	err := s.db.QueryRow(ctx, familyCountQuery, userID).Scan(&familyCount)
 	if err != nil {
@@ -208,7 +218,7 @@ func (s *Service) GetUserShoppingListsWithFamilies(ctx context.Context, userID u
 	for rows.Next() {
 		var list ShoppingList
 		var familyName *string
-		
+
 		err := rows.Scan(
 			&list.ID,
 			&list.Name,
@@ -224,7 +234,7 @@ func (s *Service) GetUserShoppingListsWithFamilies(ctx context.Context, userID u
 			span.RecordError(err)
 			return nil, 0, fmt.Errorf("failed to scan shopping list with family: %w", err)
 		}
-		
+
 		listWithFamily := &ShoppingListWithFamily{
 			ShoppingList: &list,
 			FamilyName:   familyName,
@@ -575,6 +585,186 @@ func (s *Service) CanUserAccessList(ctx context.Context, listID, userID uuid.UUI
 	return canAccess, nil
 }
 
+// CheckDuplicateItems checks for duplicate items based on parsed_item_id and returns duplicates found
+func (s *Service) CheckDuplicateItems(ctx context.Context, listID uuid.UUID, rawText, languageCode string, addedBy uuid.UUID) ([]*DuplicateItemInfo, []*ai.ParsedResult, error) {
+	ctx, span := tracer.Start(ctx, "shopping.CheckDuplicateItems")
+	defer span.End()
+
+	// Parse items with AI first
+	if s.aiService == nil {
+		return nil, nil, fmt.Errorf("AI service is not available")
+	}
+
+	parsedResults, err := s.aiService.ParseAndStoreItems(ctx, rawText, languageCode, addedBy)
+	if err != nil {
+		s.logger.Error("AI parsing failed during duplicate check", "error", err)
+		return nil, nil, fmt.Errorf("failed to parse items with AI: %w", err)
+	}
+
+	var duplicates []*DuplicateItemInfo
+	var uniqueItems []*ai.ParsedResult
+
+	// Check each parsed item for duplicates
+	for _, parsedResult := range parsedResults {
+		// Check if this parsed item already exists in the list
+		// Use both parsed_item_id (if available) and standardized name matching
+		var query string
+		var params []interface{}
+
+		if parsedResult.ParsedItemID != nil {
+			// Has parsed_item_id, use comprehensive matching
+			query = `
+				SELECT id, list_id, name, quantity, is_completed, added_by, completed_by, completed_at,
+				       original_item_id, parsed_item_id, display_name, parsed_name, parsing_status,
+				       created_at, updated_at
+				FROM shopping_items 
+				WHERE list_id = $1 AND is_completed = false AND (
+					parsed_item_id = $2 OR 
+					LOWER(TRIM(parsed_name)) = LOWER(TRIM($3)) OR
+					LOWER(TRIM(name)) = LOWER(TRIM($3))
+				)
+				LIMIT 1
+			`
+			params = []interface{}{listID, *parsedResult.ParsedItemID, parsedResult.StandardizedName}
+		} else {
+			// No parsed_item_id, use name matching only
+			query = `
+				SELECT id, list_id, name, quantity, is_completed, added_by, completed_by, completed_at,
+				       original_item_id, parsed_item_id, display_name, parsed_name, parsing_status,
+				       created_at, updated_at
+				FROM shopping_items 
+				WHERE list_id = $1 AND is_completed = false AND (
+					LOWER(TRIM(parsed_name)) = LOWER(TRIM($2)) OR
+					LOWER(TRIM(name)) = LOWER(TRIM($2))
+				)
+				LIMIT 1
+			`
+			params = []interface{}{listID, parsedResult.StandardizedName}
+		}
+
+		var existingItem ShoppingItem
+		err := s.db.QueryRow(ctx, query, params...).Scan(
+			&existingItem.ID, &existingItem.ListID, &existingItem.Name, &existingItem.Quantity,
+			&existingItem.IsCompleted, &existingItem.AddedBy, &existingItem.CompletedBy, &existingItem.CompletedAt,
+			&existingItem.OriginalItemID, &existingItem.ParsedItemID, &existingItem.DisplayName,
+			&existingItem.ParsedName, &existingItem.ParsingStatus, &existingItem.CreatedAt, &existingItem.UpdatedAt,
+		)
+
+		if err == nil {
+			// Duplicate found - create quantity string for new item
+			var newQuantity *string
+			if parsedResult.QuantityValue != nil {
+				value := *parsedResult.QuantityValue
+				var valueStr string
+				if value == float64(int(value)) {
+					valueStr = fmt.Sprintf("%.0f", value)
+				} else {
+					valueStr = fmt.Sprintf("%.1f", value)
+				}
+
+				quantityStr := valueStr
+				if parsedResult.QuantityUnit != "" {
+					quantityStr = fmt.Sprintf("%s %s", valueStr, parsedResult.QuantityUnit)
+				}
+				newQuantity = &quantityStr
+			}
+
+			var parsedItemID uuid.UUID
+			if parsedResult.ParsedItemID != nil {
+				parsedItemID = *parsedResult.ParsedItemID
+			} else if existingItem.ParsedItemID != nil {
+				parsedItemID = *existingItem.ParsedItemID
+			}
+
+			duplicate := &DuplicateItemInfo{
+				NewItemName:  parsedResult.StandardizedName,
+				ParsedName:   parsedResult.StandardizedName,
+				ExistingItem: &existingItem,
+				ParsedItemID: parsedItemID,
+				NewQuantity:  newQuantity,
+			}
+			duplicates = append(duplicates, duplicate)
+		} else {
+			// Not a duplicate, add to unique items
+			uniqueItems = append(uniqueItems, parsedResult)
+		}
+	}
+
+	return duplicates, uniqueItems, nil
+}
+
+// AddParsedItemsToList adds items from already parsed results
+func (s *Service) AddParsedItemsToList(ctx context.Context, listID uuid.UUID, parsedResults []*ai.ParsedResult, addedBy uuid.UUID) ([]*ShoppingItem, []string, error) {
+	ctx, span := tracer.Start(ctx, "shopping.AddParsedItemsToList")
+	defer span.End()
+
+	var addedItems []*ShoppingItem
+	var failedItems []string
+
+	for _, parsedResult := range parsedResults {
+		// Use the standardized name as display name (this preserves original language)
+		itemName := parsedResult.StandardizedName
+		displayName := parsedResult.StandardizedName
+		quantityStr := ""
+		if parsedResult.QuantityValue != nil {
+			value := *parsedResult.QuantityValue
+			var valueStr string
+			if value == float64(int(value)) {
+				valueStr = fmt.Sprintf("%.0f", value)
+			} else {
+				valueStr = fmt.Sprintf("%.1f", value)
+			}
+
+			if parsedResult.QuantityUnit != "" {
+				quantityStr = fmt.Sprintf("%s %s", valueStr, parsedResult.QuantityUnit)
+			} else {
+				quantityStr = valueStr
+			}
+		}
+
+		// Create shopping item with AI parsing data
+		query := `
+			INSERT INTO shopping_items (list_id, name, quantity, is_completed, added_by, 
+			                           original_item_id, parsed_item_id, display_name, parsed_name, parsing_status, created_at, updated_at)
+			VALUES ($1, $2, $3, false, $4, $5, $6, $7, $8, 'parsed', NOW(), NOW())
+			RETURNING id, list_id, name, quantity, is_completed, added_by, completed_by, completed_at,
+			         original_item_id, parsed_item_id, display_name, parsed_name, parsing_status,
+			         created_at, updated_at
+		`
+
+		var item ShoppingItem
+		parsedName := parsedResult.StandardizedName
+
+		var quantityParam *string
+		if quantityStr != "" {
+			quantityParam = &quantityStr
+		}
+
+		err := s.db.QueryRow(ctx, query, listID, itemName, quantityParam, addedBy,
+			parsedResult.OriginalItemID, parsedResult.ParsedItemID, displayName, parsedName).Scan(
+			&item.ID, &item.ListID, &item.Name, &item.Quantity, &item.IsCompleted,
+			&item.AddedBy, &item.CompletedBy, &item.CompletedAt,
+			&item.OriginalItemID, &item.ParsedItemID, &item.DisplayName, &item.ParsedName, &item.ParsingStatus,
+			&item.CreatedAt, &item.UpdatedAt,
+		)
+
+		if err != nil {
+			s.logger.Error("Failed to insert parsed shopping item", "error", err, "item", itemName)
+			failedItems = append(failedItems, itemName)
+			continue
+		}
+
+		addedItems = append(addedItems, &item)
+		s.logger.Info("Successfully added AI-parsed item",
+			"original", itemName,
+			"parsed", parsedResult.StandardizedName,
+			"category", parsedResult.Category,
+			"confidence", parsedResult.ConfidenceScore)
+	}
+
+	return addedItems, failedItems, nil
+}
+
 // AddItemsToListWithAI uses AI to intelligently parse and add multiple items to a shopping list
 func (s *Service) AddItemsToListWithAI(ctx context.Context, listID uuid.UUID, rawText, languageCode string, addedBy uuid.UUID) ([]*ShoppingItem, []string, error) {
 	ctx, span := tracer.Start(ctx, "shopping.AddItemsToListWithAI")
@@ -609,7 +799,7 @@ func (s *Service) AddItemsToListWithAI(ctx context.Context, listID uuid.UUID, ra
 					// Decimal number, show one decimal place
 					valueStr = fmt.Sprintf("%.1f", value)
 				}
-				
+
 				if parsedResult.QuantityUnit != "" {
 					quantityStr = fmt.Sprintf("%s %s", valueStr, parsedResult.QuantityUnit)
 				} else {
@@ -629,14 +819,14 @@ func (s *Service) AddItemsToListWithAI(ctx context.Context, listID uuid.UUID, ra
 
 			var item ShoppingItem
 			parsedName := parsedResult.StandardizedName // Use same for buttons
-			
+
 			// For quantity, use empty string if no quantity
 			var quantityParam *string
 			if quantityStr != "" {
 				quantityParam = &quantityStr
 			}
 
-			err := s.db.QueryRow(ctx, query, listID, itemName, quantityParam, addedBy, 
+			err := s.db.QueryRow(ctx, query, listID, itemName, quantityParam, addedBy,
 				parsedResult.OriginalItemID, parsedResult.ParsedItemID, displayName, parsedName).Scan(
 				&item.ID, &item.ListID, &item.Name, &item.Quantity, &item.IsCompleted,
 				&item.AddedBy, &item.CompletedBy, &item.CompletedAt,
@@ -651,7 +841,7 @@ func (s *Service) AddItemsToListWithAI(ctx context.Context, listID uuid.UUID, ra
 			}
 
 			addedItems = append(addedItems, &item)
-			s.logger.Info("Successfully added AI-parsed item", 
+			s.logger.Info("Successfully added AI-parsed item",
 				"original", itemName,
 				"parsed", parsedResult.StandardizedName,
 				"category", parsedResult.Category,
@@ -663,4 +853,74 @@ func (s *Service) AddItemsToListWithAI(ctx context.Context, listID uuid.UUID, ra
 	}
 
 	return addedItems, failedItems, nil
+}
+
+// UpdateShoppingItemRequest represents a request to update an existing shopping item
+type UpdateShoppingItemRequest struct {
+	Name     *string `json:"name,omitempty"`
+	Quantity *string `json:"quantity,omitempty"`
+}
+
+// UpdateShoppingItem updates an existing shopping item's name or quantity
+func (s *Service) UpdateShoppingItem(ctx context.Context, itemID uuid.UUID, req UpdateShoppingItemRequest, updatedBy uuid.UUID) error {
+	ctx, span := tracer.Start(ctx, "shopping.UpdateShoppingItem")
+	defer span.End()
+
+	// Build dynamic SQL based on which fields need updating
+	var setParts []string
+	var args []interface{}
+	argIndex := 1
+
+	if req.Name != nil {
+		setParts = append(setParts, fmt.Sprintf("name = $%d", argIndex))
+		args = append(args, *req.Name)
+		argIndex++
+	}
+
+	if req.Quantity != nil {
+		setParts = append(setParts, fmt.Sprintf("quantity = $%d", argIndex))
+		args = append(args, *req.Quantity)
+		argIndex++
+	}
+
+	if len(setParts) == 0 {
+		return fmt.Errorf("no fields to update")
+	}
+
+	// Add updated_at
+	setParts = append(setParts, fmt.Sprintf("updated_at = $%d", argIndex))
+	args = append(args, time.Now())
+	argIndex++
+
+	// Add WHERE clause
+	args = append(args, itemID)
+	whereClause := fmt.Sprintf("id = $%d", argIndex)
+
+	query := fmt.Sprintf("UPDATE shopping_items SET %s WHERE %s", strings.Join(setParts, ", "), whereClause)
+
+	result, err := s.db.Exec(ctx, query, args...)
+	if err != nil {
+		s.logger.Error("Failed to update shopping item",
+			"error", err,
+			"item_id", itemID,
+			"updated_by", updatedBy)
+		return fmt.Errorf("failed to update item: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("item not found")
+	}
+
+	s.logger.Info("Shopping item updated successfully",
+		"item_id", itemID,
+		"updated_by", updatedBy,
+		"name_updated", req.Name != nil,
+		"quantity_updated", req.Quantity != nil)
+
+	return nil
+}
+
+// GetShoppingList retrieves a shopping list by ID (alias for GetShoppingListByID)
+func (s *Service) GetShoppingList(ctx context.Context, listID uuid.UUID) (*ShoppingList, error) {
+	return s.GetShoppingListByID(ctx, listID)
 }

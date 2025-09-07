@@ -26,9 +26,16 @@ func NewTemplateManager() (*TemplateManager, error) {
 	// Load templates for each supported locale
 	locales := []string{"en", "uk", "ru"}
 
+	// Define template helper functions
+	funcMap := template.FuncMap{
+		"add": func(a, b int) int {
+			return a + b
+		},
+	}
+
 	for _, locale := range locales {
 		pattern := fmt.Sprintf("templates/%s/*.html", locale)
-		tmpl, err := template.ParseFS(templateFiles, pattern)
+		tmpl, err := template.New("").Funcs(funcMap).ParseFS(templateFiles, pattern)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse templates for locale %s: %w", locale, err)
 		}

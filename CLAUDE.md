@@ -127,3 +127,4 @@ See `.env.example` for all available configuration options.
 - Use `make unit-test` for standard testing
 - Integration tests require the `integration` build tag
 - No existing test files found - create tests following Go conventions
+- Add to memory: Use localization for everithing

@@ -1,0 +1,11 @@
+🔍 <b>Знайдено дублюючі товари!</b>
+
+Наступні товари вже є у вашому списку:
+
+{{range $index, $duplicate := .Duplicates}}
+<b>{{add $index 1}}. {{$duplicate.ParsedName}}</b>
+   • Існуючий: {{if $duplicate.ExistingItem.Quantity}}{{$duplicate.ExistingItem.Quantity}}{{else}}без кількості{{end}}
+   • Новий: {{if $duplicate.NewQuantity}}{{$duplicate.NewQuantity}}{{else}}без кількості{{end}}
+
+{{end}}
+Оберіть, що робити:

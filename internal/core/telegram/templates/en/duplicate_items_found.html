@@ -1,0 +1,11 @@
+🔍 <b>Duplicate Items Found!</b>
+
+The following items are already in your list:
+
+{{range $index, $duplicate := .Duplicates}}
+<b>{{add $index 1}}. {{$duplicate.ParsedName}}</b>
+   • Existing: {{if $duplicate.ExistingItem.Quantity}}{{$duplicate.ExistingItem.Quantity}}{{else}}no quantity{{end}}
+   • New: {{if $duplicate.NewQuantity}}{{$duplicate.NewQuantity}}{{else}}no quantity{{end}}
+
+{{end}}
+Choose what to do:

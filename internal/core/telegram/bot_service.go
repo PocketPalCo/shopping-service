@@ -22,14 +22,15 @@ type BotService struct {
 	shoppingService *shopping.Service
 	logger          *slog.Logger
 	templateManager *TemplateManager
-	
+
 	// Refactored components with proper user separation
-	commandRegistry        *commands.CommandRegistry
-	stateManager           *handlers.StateManager
-	listCallbackHandler    *handlers.ListCallbackHandler
-	generalCallbackHandler *handlers.GeneralCallbackHandler
-	messageHandler         *handlers.MessageHandler
-	userMapper             *UserMapper
+	commandRegistry          *commands.CommandRegistry
+	stateManager             *handlers.StateManager
+	listCallbackHandler      *handlers.ListCallbackHandler
+	generalCallbackHandler   *handlers.GeneralCallbackHandler
+	duplicateCallbackHandler *handlers.DuplicateCallbackHandler
+	messageHandler           *handlers.MessageHandler
+	userMapper               *UserMapper
 }
 
 func NewBotService(token string, usersService *users.Service, familiesService *families.Service, shoppingService *shopping.Service, logger *slog.Logger, debug bool) (*BotService, error) {
@@ -56,21 +57,23 @@ func NewBotService(token string, usersService *users.Service, familiesService *f
 	stateManager := handlers.NewStateManager(logger)
 	listCallbackHandler := handlers.NewListCallbackHandler(baseHandler)
 	generalCallbackHandler := handlers.NewGeneralCallbackHandler(baseHandler)
-	messageHandler := handlers.NewMessageHandler(baseHandler)
+	duplicateCallbackHandler := handlers.NewDuplicateCallbackHandler(baseHandler, stateManager)
+	messageHandler := handlers.NewMessageHandler(baseHandler, stateManager)
 
 	return &BotService{
-		bot:                    bot,
-		usersService:           usersService,
-		familiesService:        familiesService,
-		shoppingService:        shoppingService,
-		logger:                 logger,
-		templateManager:        templateManager,
-		commandRegistry:        commandRegistry,
-		stateManager:           stateManager,
-		listCallbackHandler:    listCallbackHandler,
-		generalCallbackHandler: generalCallbackHandler,
-		messageHandler:         messageHandler,
-		userMapper:             userMapper,
+		bot:                      bot,
+		usersService:             usersService,
+		familiesService:          familiesService,
+		shoppingService:          shoppingService,
+		logger:                   logger,
+		templateManager:          templateManager,
+		commandRegistry:          commandRegistry,
+		stateManager:             stateManager,
+		listCallbackHandler:      listCallbackHandler,
+		generalCallbackHandler:   generalCallbackHandler,
+		duplicateCallbackHandler: duplicateCallbackHandler,
+		messageHandler:           messageHandler,
+		userMapper:               userMapper,
 	}, nil
 }
 
@@ -228,6 +231,8 @@ func (s *BotService) handleCallbackQuery(ctx context.Context, callback *tgbotapi
 		if len(parts) >= 3 && parts[1] == "new" && parts[2] == "list" {
 			s.generalCallbackHandler.HandleCreateNewList(ctx, callback, internalUser.User)
 		}
+	case "dup":
+		s.duplicateCallbackHandler.HandleDuplicateCallback(ctx, callback, parts, internalUser.User)
 	default:
 		s.answerCallback(callback.ID, "❌ Unknown callback action.")
 	}
