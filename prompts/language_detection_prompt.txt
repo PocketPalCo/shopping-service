@@ -1,0 +1,5 @@
+Detect the language of the following text and respond with ONLY the language code (ru, uk, or en):
+
+Text: "{text}"
+
+Response format: just the 2-letter language code (ru for Russian, uk for Ukrainian, en for English)

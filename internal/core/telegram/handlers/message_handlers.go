@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/PocketPalCo/shopping-service/internal/core/ai"
+	"github.com/PocketPalCo/shopping-service/internal/core/language"
 	"github.com/PocketPalCo/shopping-service/internal/core/shopping"
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -179,8 +180,32 @@ func (h *MessageHandler) HandleAddItemInput(ctx context.Context, message *tgbota
 		return
 	}
 
+	// Smart language detection: analyze text content and consider user preference
+	// For now, use the simple approach since we need to set up the language detector properly
+	detectedLanguage := language.NormalizeLanguageCode(user.Locale)
+
+	// Quick check: if text contains Cyrillic characters, default to Russian
+	containsCyrillic := false
+	for _, r := range itemText {
+		if r >= 0x0400 && r <= 0x04FF {
+			containsCyrillic = true
+			break
+		}
+	}
+
+	if containsCyrillic && detectedLanguage == "en" {
+		detectedLanguage = "ru" // Default Cyrillic text to Russian
+	}
+
+	h.logger.Info("Language detection for item input",
+		"item_text", itemText,
+		"user_locale", user.Locale,
+		"detected_language", detectedLanguage,
+		"contains_cyrillic", containsCyrillic,
+		"user_id", user.ID)
+
 	// Check for duplicate items first
-	duplicates, uniqueItems, err := h.shoppingService.CheckDuplicateItems(ctx, listID, itemText, user.Locale, user.ID)
+	duplicates, uniqueItems, err := h.shoppingService.CheckDuplicateItems(ctx, listID, itemText, detectedLanguage, user.ID)
 	if err != nil {
 		h.logger.Error("Failed to check for duplicate items", "error", err)
 		h.SendMessage(message.Chat.ID, "❌ Failed to process items. Please try again.")

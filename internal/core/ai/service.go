@@ -63,6 +63,7 @@ type ParsedResult struct {
 type OpenAIClient interface {
 	ParseItem(ctx context.Context, rawText, languageCode string) (*ParsedResult, error)
 	ParseItems(ctx context.Context, rawText, languageCode string) ([]*ParsedResult, error)
+	DetectLanguage(ctx context.Context, text string) (string, error)
 }
 
 type Service struct {
@@ -389,7 +390,7 @@ func (s *Service) ParseAndStoreItems(ctx context.Context, rawText, languageCode 
 		// Attach the IDs to the parsed result so they can be used by the shopping service
 		parsedResult.OriginalItemID = &originalItem.ID
 		parsedResult.ParsedItemID = &parsedItem.ID
-		
+
 		results = append(results, parsedResult)
 	}
 

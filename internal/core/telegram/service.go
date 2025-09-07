@@ -8,6 +8,7 @@ import (
 	"github.com/PocketPalCo/shopping-service/config"
 	"github.com/PocketPalCo/shopping-service/internal/core/ai"
 	"github.com/PocketPalCo/shopping-service/internal/core/families"
+	"github.com/PocketPalCo/shopping-service/internal/core/products"
 	"github.com/PocketPalCo/shopping-service/internal/core/shopping"
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -53,21 +54,23 @@ func NewTelegramService(cfg *config.Config, db *pgxpool.Pool, logger *slog.Logge
 	usersService := users.NewService(db, admins)
 	familiesService := families.NewService(db)
 
+	// Initialize products service
+	productsService := products.NewService(db, logger)
+
 	// Initialize AI service with OpenAI client using config
 	openAIConfig := cfg.GetOpenAIConfig()
 
-	var aiClient ai.OpenAIClient
-	if openAIConfig.APIKey != "" {
-		aiClient = ai.NewOpenAIClient(openAIConfig, logger)
-	}
-
-	if aiClient == nil {
+	if openAIConfig.APIKey == "" {
 		logger.Error("failed to initialize OpenAI client",
 			"error", "OpenAI API key not configured (set SSV_OPENAI_API_KEY)",
 			"component", "ai_service")
 		return nil, nil
 	}
 
+	// Create OpenAI client with the products service
+	aiClient := ai.NewOpenAIClient(openAIConfig, logger, productsService)
+
+	// Create the AI service with the client
 	aiService := ai.NewService(db, aiClient, logger)
 
 	shoppingService := shopping.NewService(db, aiService)

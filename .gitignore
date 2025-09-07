@@ -94,3 +94,5 @@ vendor/
 docker-compose.yml
 
 .env
+
+logs/*

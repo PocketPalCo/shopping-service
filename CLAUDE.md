@@ -128,3 +128,4 @@ See `.env.example` for all available configuration options.
 - Integration tests require the `integration` build tag
 - No existing test files found - create tests following Go conventions
 - Add to memory: Use localization for everithing
+- to memizize all prompts should be in separate files

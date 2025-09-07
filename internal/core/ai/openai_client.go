@@ -12,13 +12,19 @@ import (
 	"time"
 
 	"github.com/PocketPalCo/shopping-service/config"
+	"github.com/PocketPalCo/shopping-service/internal/core/products"
 )
 
+type ProductService interface {
+	GetAllProducts(ctx context.Context) ([]*products.Product, error)
+}
+
 type openAIClient struct {
-	config        config.OpenAIConfig
-	httpClient    *http.Client
-	logger        *slog.Logger
-	promptBuilder *PromptBuilder
+	config         config.OpenAIConfig
+	httpClient     *http.Client
+	logger         *slog.Logger
+	promptBuilder  *PromptBuilder
+	productService ProductService
 }
 
 // Chat Completions API structures (legacy)
@@ -91,11 +97,11 @@ type Usage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-func NewOpenAIClient(cfg config.OpenAIConfig, logger *slog.Logger) OpenAIClient {
-	return NewOpenAIClientWithPrompts(cfg, logger, "prompts")
+func NewOpenAIClient(cfg config.OpenAIConfig, logger *slog.Logger, productService ProductService) OpenAIClient {
+	return NewOpenAIClientWithPrompts(cfg, logger, "prompts", productService)
 }
 
-func NewOpenAIClientWithPrompts(cfg config.OpenAIConfig, logger *slog.Logger, promptsDir string) OpenAIClient {
+func NewOpenAIClientWithPrompts(cfg config.OpenAIConfig, logger *slog.Logger, promptsDir string, productService ProductService) OpenAIClient {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://api.openai.com/v1"
 	}
@@ -130,8 +136,9 @@ func NewOpenAIClientWithPrompts(cfg config.OpenAIConfig, logger *slog.Logger, pr
 		httpClient: &http.Client{
 			Timeout: 45 * time.Second, // Increased timeout for reasoning models
 		},
-		logger:        logger,
-		promptBuilder: promptBuilder,
+		logger:         logger,
+		promptBuilder:  promptBuilder,
+		productService: productService,
 	}
 }
 
@@ -545,16 +552,32 @@ func (c *openAIClient) buildMultiItemPrompt(rawText, languageCode string) string
 		return ""
 	}
 
-	prompt, err := c.promptBuilder.BuildMultiItemPrompt(rawText, languageCode)
+	// First, try to get products from the database
+	ctx := context.Background() // Using a background context for this operation
+	products, err := c.productService.GetAllProducts(ctx)
 	if err != nil {
-		c.logger.Error("Failed to build multi-item prompt from files", "error", err)
+		c.logger.Warn("Failed to fetch products for AI prompt, falling back to basic prompt", "error", err)
+		// Fall back to the old prompt without products
+		prompt, err := c.promptBuilder.BuildMultiItemPrompt(rawText, languageCode)
+		if err != nil {
+			c.logger.Error("Failed to build fallback multi-item prompt from files", "error", err)
+			return ""
+		}
+		return prompt
+	}
+
+	// Use the enhanced prompt with products
+	prompt, err := c.promptBuilder.BuildMultiItemPromptWithProducts(rawText, languageCode, products)
+	if err != nil {
+		c.logger.Error("Failed to build multi-item prompt with products from files", "error", err)
 		return ""
 	}
 
 	// Log the built prompt for debugging
-	c.logger.Info("Built multi-item prompt for AI",
+	c.logger.Info("Built enhanced multi-item prompt for AI with products",
 		"raw_text", rawText,
 		"language", languageCode,
+		"products_count", len(products),
 		"prompt_length", len(prompt),
 		"prompt_preview", prompt[:min(500, len(prompt))]+"...") // First 500 chars
 
@@ -591,6 +614,93 @@ func (c *openAIClient) parseAIResponseAsArray(content string) ([]*ParsedResult, 
 	}
 
 	return results, nil
+}
+
+// DetectLanguage detects the language of the given text using OpenAI
+func (c *openAIClient) DetectLanguage(ctx context.Context, text string) (string, error) {
+	// Use a simple prompt to detect language
+	prompt := fmt.Sprintf(`Detect the language of the following text and respond with ONLY the language code (ru, uk, or en):
+
+Text: "%s"
+
+Response format: just the 2-letter language code (ru for Russian, uk for Ukrainian, en for English)`, text)
+
+	reqData := ResponsesRequest{
+		Model: "gpt-5-nano",
+		Input: []ResponsesMessage{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Store:     &[]bool{true}[0],
+		Reasoning: &ResponsesReasoning{Effort: "low"},
+	}
+
+	reqJSON, err := json.Marshal(reqData)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal language detection request: %w", err)
+	}
+
+	c.logger.Info("[LANG] Sending language detection request to OpenAI Responses API",
+		"url", c.config.BaseURL+"/responses",
+		"model", reqData.Model,
+		"text", text,
+		"request_body", string(reqJSON))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.config.BaseURL+"/responses", bytes.NewReader(reqJSON))
+	if err != nil {
+		return "", fmt.Errorf("failed to create language detection request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("language detection API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read language detection response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("language detection API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var apiResp ResponsesResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return "", fmt.Errorf("failed to unmarshal language detection response: %w", err)
+	}
+
+	if len(apiResp.Output) == 0 {
+		return "", fmt.Errorf("no language detection output returned")
+	}
+
+	// Find the assistant message in the output
+	var content string
+	for _, output := range apiResp.Output {
+		if output.Role == "assistant" && len(output.Content) > 0 {
+			content = output.Content[0].Text
+			break
+		}
+	}
+
+	if content == "" {
+		return "", fmt.Errorf("no assistant response found in language detection output")
+	}
+
+	detectedLanguage := strings.TrimSpace(strings.ToLower(content))
+
+	c.logger.Info("Successfully detected language with Responses API",
+		"text", text,
+		"detected_language", detectedLanguage,
+		"model", reqData.Model)
+
+	return detectedLanguage, nil
 }
 
 // Helper function for min operation

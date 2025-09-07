@@ -44,22 +44,20 @@ func truncateUTF8(s string, maxRunes int) string {
 	return string(runes[:maxRunes-3]) + "..."
 }
 
-// HandleViewList shows a shopping list with its items and action buttons
-func (h *ListCallbackHandler) HandleViewList(ctx context.Context, callback *tgbotapi.CallbackQuery, listID uuid.UUID, user *users.User) {
+// BuildListViewMessage creates the message text and keyboard for a shopping list
+func (h *ListCallbackHandler) BuildListViewMessage(ctx context.Context, listID uuid.UUID, user *users.User) (string, tgbotapi.InlineKeyboardMarkup, error) {
 	// Get the shopping list
 	list, err := h.shoppingService.GetShoppingListByID(ctx, listID)
 	if err != nil || list == nil {
 		h.logger.Error("Failed to get shopping list", "error", err, "list_id", listID)
-		h.AnswerCallback(callback.ID, "❌ List not found.")
-		return
+		return "", tgbotapi.InlineKeyboardMarkup{}, err
 	}
 
 	// Get list items
 	items, err := h.shoppingService.GetListItems(ctx, listID)
 	if err != nil {
 		h.logger.Error("Failed to get list items", "error", err, "list_id", listID)
-		h.AnswerCallback(callback.ID, "❌ Failed to load list items.")
-		return
+		return "", tgbotapi.InlineKeyboardMarkup{}, err
 	}
 
 	// Build the message
@@ -148,6 +146,17 @@ func (h *ListCallbackHandler) HandleViewList(ctx context.Context, callback *tgbo
 	})
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+	return message, keyboard, nil
+}
+
+// HandleViewList shows a shopping list with its items and action buttons
+func (h *ListCallbackHandler) HandleViewList(ctx context.Context, callback *tgbotapi.CallbackQuery, listID uuid.UUID, user *users.User) {
+	message, keyboard, err := h.BuildListViewMessage(ctx, listID, user)
+	if err != nil {
+		h.AnswerCallback(callback.ID, "❌ Failed to load list.")
+		return
+	}
 
 	// Edit the original message
 	editMsg := tgbotapi.NewEditMessageText(
