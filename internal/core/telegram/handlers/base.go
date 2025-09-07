@@ -1,4 +1,4 @@
-package commands
+package handlers
 
 import (
 	"log/slog"
@@ -16,8 +16,8 @@ type TemplateRenderer interface {
 	RenderMessage(messageName, locale string) string
 }
 
-// BaseCommand provides common functionality for all commands
-type BaseCommand struct {
+// BaseHandler provides common functionality for all handlers
+type BaseHandler struct {
 	bot             *tgbotapi.BotAPI
 	usersService    *users.Service
 	familiesService *families.Service
@@ -26,16 +26,16 @@ type BaseCommand struct {
 	logger          *slog.Logger
 }
 
-// NewBaseCommand creates a new base command with common dependencies
-func NewBaseCommand(
+// NewBaseHandler creates a new base handler with common dependencies
+func NewBaseHandler(
 	bot *tgbotapi.BotAPI,
 	usersService *users.Service,
 	familiesService *families.Service,
 	shoppingService *shopping.Service,
 	templateManager TemplateRenderer,
 	logger *slog.Logger,
-) BaseCommand {
-	return BaseCommand{
+) BaseHandler {
+	return BaseHandler{
 		bot:             bot,
 		usersService:    usersService,
 		familiesService: familiesService,
@@ -46,28 +46,30 @@ func NewBaseCommand(
 }
 
 // SendMessage sends a simple text message
-func (bc *BaseCommand) SendMessage(chatID int64, text string) {
-	msg := tgbotapi.NewMessage(chatID, text)
-	if _, err := bc.bot.Send(msg); err != nil {
-		bc.logger.Error("Failed to send message", "error", err, "chat_id", chatID)
-	}
-}
-
-// SendHTMLMessage sends a message with HTML formatting
-func (bc *BaseCommand) SendHTMLMessage(chatID int64, text string) {
+func (bh *BaseHandler) SendMessage(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = tgbotapi.ModeHTML
-	if _, err := bc.bot.Send(msg); err != nil {
-		bc.logger.Error("Failed to send HTML message", "error", err, "chat_id", chatID)
+	msg.DisableWebPagePreview = true
+
+	if _, err := bh.bot.Send(msg); err != nil {
+		bh.logger.Error("Failed to send message", "error", err, "chat_id", chatID)
 	}
 }
 
 // SendMessageWithKeyboard sends a message with inline keyboard
-func (bc *BaseCommand) SendMessageWithKeyboard(chatID int64, text string, keyboard tgbotapi.InlineKeyboardMarkup) {
+func (bh *BaseHandler) SendMessageWithKeyboard(chatID int64, text string, keyboard tgbotapi.InlineKeyboardMarkup) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = tgbotapi.ModeHTML
 	msg.ReplyMarkup = keyboard
-	if _, err := bc.bot.Send(msg); err != nil {
-		bc.logger.Error("Failed to send message with keyboard", "error", err, "chat_id", chatID)
+	if _, err := bh.bot.Send(msg); err != nil {
+		bh.logger.Error("Failed to send message with keyboard", "error", err, "chat_id", chatID)
+	}
+}
+
+// AnswerCallback answers an inline keyboard callback
+func (bh *BaseHandler) AnswerCallback(callbackID, text string) {
+	callback := tgbotapi.NewCallback(callbackID, text)
+	if _, err := bh.bot.Request(callback); err != nil {
+		bh.logger.Error("Failed to answer callback", "error", err, "callback_id", callbackID)
 	}
 }

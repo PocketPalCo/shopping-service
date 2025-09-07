@@ -158,6 +158,88 @@ func (s *Service) GetUserShoppingLists(ctx context.Context, userID uuid.UUID) ([
 	return lists, nil
 }
 
+// ShoppingListWithFamily represents a shopping list with optional family information
+type ShoppingListWithFamily struct {
+	*ShoppingList
+	FamilyName *string `json:"family_name,omitempty"`
+}
+
+// GetUserShoppingListsWithFamilies returns shopping lists with family names and user family count
+func (s *Service) GetUserShoppingListsWithFamilies(ctx context.Context, userID uuid.UUID) ([]*ShoppingListWithFamily, int, error) {
+	ctx, span := tracer.Start(ctx, "shopping.GetUserShoppingListsWithFamilies")
+	defer span.End()
+
+	// First, get the user's family count
+	familyCountQuery := `
+		SELECT COUNT(DISTINCT f.id)
+		FROM families f
+		JOIN family_members fm ON f.id = fm.family_id
+		WHERE fm.user_id = $1
+	`
+	
+	var familyCount int
+	err := s.db.QueryRow(ctx, familyCountQuery, userID).Scan(&familyCount)
+	if err != nil {
+		span.RecordError(err)
+		return nil, 0, fmt.Errorf("failed to get user family count: %w", err)
+	}
+
+	// Get shopping lists with family names
+	query := `
+		SELECT DISTINCT sl.id, sl.name, sl.description, sl.owner_id, sl.family_id, sl.is_shared, 
+		       sl.created_at, sl.updated_at, f.name as family_name
+		FROM shopping_lists sl
+		LEFT JOIN family_members fm ON sl.family_id = fm.family_id
+		LEFT JOIN families f ON sl.family_id = f.id
+		WHERE sl.owner_id = $1 
+		   OR sl.is_shared = true 
+		   OR (sl.family_id IS NOT NULL AND fm.user_id = $1)
+		ORDER BY sl.created_at DESC
+	`
+
+	rows, err := s.db.Query(ctx, query, userID)
+	if err != nil {
+		span.RecordError(err)
+		return nil, 0, fmt.Errorf("failed to get user shopping lists with families: %w", err)
+	}
+	defer rows.Close()
+
+	var lists []*ShoppingListWithFamily
+	for rows.Next() {
+		var list ShoppingList
+		var familyName *string
+		
+		err := rows.Scan(
+			&list.ID,
+			&list.Name,
+			&list.Description,
+			&list.OwnerID,
+			&list.FamilyID,
+			&list.IsShared,
+			&list.CreatedAt,
+			&list.UpdatedAt,
+			&familyName,
+		)
+		if err != nil {
+			span.RecordError(err)
+			return nil, 0, fmt.Errorf("failed to scan shopping list with family: %w", err)
+		}
+		
+		listWithFamily := &ShoppingListWithFamily{
+			ShoppingList: &list,
+			FamilyName:   familyName,
+		}
+		lists = append(lists, listWithFamily)
+	}
+
+	if err = rows.Err(); err != nil {
+		span.RecordError(err)
+		return nil, 0, fmt.Errorf("error iterating over shopping lists with families: %w", err)
+	}
+
+	return lists, familyCount, nil
+}
+
 func (s *Service) GetShoppingListByID(ctx context.Context, listID uuid.UUID) (*ShoppingList, error) {
 	ctx, span := tracer.Start(ctx, "shopping.GetShoppingListByID")
 	defer span.End()
@@ -538,8 +620,8 @@ func (s *Service) AddItemsToListWithAI(ctx context.Context, listID uuid.UUID, ra
 			// Create shopping item with AI parsing data
 			query := `
 				INSERT INTO shopping_items (list_id, name, quantity, is_completed, added_by, 
-				                           display_name, parsed_name, parsing_status, created_at, updated_at)
-				VALUES ($1, $2, $3, false, $4, $5, $6, 'parsed', NOW(), NOW())
+				                           original_item_id, parsed_item_id, display_name, parsed_name, parsing_status, created_at, updated_at)
+				VALUES ($1, $2, $3, false, $4, $5, $6, $7, $8, 'parsed', NOW(), NOW())
 				RETURNING id, list_id, name, quantity, is_completed, added_by, completed_by, completed_at,
 				         original_item_id, parsed_item_id, display_name, parsed_name, parsing_status,
 				         created_at, updated_at
@@ -554,7 +636,8 @@ func (s *Service) AddItemsToListWithAI(ctx context.Context, listID uuid.UUID, ra
 				quantityParam = &quantityStr
 			}
 
-			err := s.db.QueryRow(ctx, query, listID, itemName, quantityParam, addedBy, displayName, parsedName).Scan(
+			err := s.db.QueryRow(ctx, query, listID, itemName, quantityParam, addedBy, 
+				parsedResult.OriginalItemID, parsedResult.ParsedItemID, displayName, parsedName).Scan(
 				&item.ID, &item.ListID, &item.Name, &item.Quantity, &item.IsCompleted,
 				&item.AddedBy, &item.CompletedBy, &item.CompletedAt,
 				&item.OriginalItemID, &item.ParsedItemID, &item.DisplayName, &item.ParsedName, &item.ParsingStatus,

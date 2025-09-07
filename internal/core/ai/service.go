@@ -50,12 +50,14 @@ type ItemMapping struct {
 }
 
 type ParsedResult struct {
-	StandardizedName string   `json:"standardized_name"`
-	Category         string   `json:"category"`
-	Subcategory      string   `json:"subcategory"`
-	QuantityValue    *float64 `json:"quantity_value,omitempty"`
-	QuantityUnit     string   `json:"quantity_unit"`
-	ConfidenceScore  float64  `json:"confidence_score"`
+	StandardizedName string     `json:"standardized_name"`
+	Category         string     `json:"category"`
+	Subcategory      string     `json:"subcategory"`
+	QuantityValue    *float64   `json:"quantity_value,omitempty"`
+	QuantityUnit     string     `json:"quantity_unit"`
+	ConfidenceScore  float64    `json:"confidence_score"`
+	OriginalItemID   *uuid.UUID `json:"original_item_id,omitempty"`
+	ParsedItemID     *uuid.UUID `json:"parsed_item_id,omitempty"`
 }
 
 type OpenAIClient interface {
@@ -350,16 +352,18 @@ func (s *Service) ParseAndStoreItems(ctx context.Context, rawText, languageCode 
 			"confidence_score", result.ConfidenceScore)
 	}
 
-	// Store ONE original item for the entire input text
-	originalItem, err := s.storeOriginalItem(ctx, rawText, languageCode, nil, userID)
-	if err != nil {
-		s.logger.Error("Failed to store original item", "error", err, "raw_text", rawText)
-		return nil, fmt.Errorf("failed to store original item: %w", err)
-	}
-
-	// Store training data for each parsed item
+	// Store training data for each parsed item - each gets its own original item record
 	var results []*ParsedResult
 	for i, parsedResult := range parsedResults {
+		// Store individual original item for this specific parsed result
+		// Use the standardized name as the original text to keep it within varchar(255) limits
+		originalItemText := parsedResult.StandardizedName
+		originalItem, err := s.storeOriginalItem(ctx, originalItemText, languageCode, nil, userID)
+		if err != nil {
+			s.logger.Error("Failed to store original item", "error", err, "original_text", originalItemText)
+			continue // Skip this item but continue with others
+		}
+
 		// Store or find the parsed item
 		parsedItem, err := s.storeParsedItem(ctx, parsedResult, languageCode)
 		if err != nil {
@@ -367,7 +371,7 @@ func (s *Service) ParseAndStoreItems(ctx context.Context, rawText, languageCode 
 			continue // Skip this item but continue with others
 		}
 
-		// Store the mapping between the single original and this parsed item
+		// Store the mapping between this specific original and parsed item
 		err = s.storeItemMapping(ctx, originalItem.ID, parsedItem.ID, "ai_openai", parsedResult.ConfidenceScore, userID)
 		if err != nil {
 			s.logger.Error("Failed to store item mapping", "error", err, "original_id", originalItem.ID, "parsed_id", parsedItem.ID)
@@ -375,13 +379,17 @@ func (s *Service) ParseAndStoreItems(ctx context.Context, rawText, languageCode 
 		}
 
 		s.logger.Info("Successfully stored training data for item",
-			"original", rawText,
+			"original", originalItemText,
 			"parsed", parsedResult.StandardizedName,
 			"category", parsedResult.Category,
 			"confidence", parsedResult.ConfidenceScore,
 			"item_index", i+1,
 			"total_items", len(parsedResults))
 
+		// Attach the IDs to the parsed result so they can be used by the shopping service
+		parsedResult.OriginalItemID = &originalItem.ID
+		parsedResult.ParsedItemID = &parsedItem.ID
+		
 		results = append(results, parsedResult)
 	}
 

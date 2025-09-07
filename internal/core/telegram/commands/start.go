@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
 )
@@ -54,20 +53,6 @@ func (c *StartCommand) Handle(ctx context.Context, chatID int64, user *users.Use
 		return err
 	}
 
-	c.SendMessage(chatID, message)
+	c.SendHTMLMessage(chatID, message)
 	return nil
-}
-
-// getUserDisplayName extracts display name from user
-func getUserDisplayName(user *users.User) string {
-	if user.FirstName != "" {
-		if user.LastName != nil && *user.LastName != "" {
-			return fmt.Sprintf("%s %s", user.FirstName, *user.LastName)
-		}
-		return user.FirstName
-	}
-	if user.Username != nil && *user.Username != "" {
-		return "@" + *user.Username
-	}
-	return "User"
 }

@@ -393,6 +393,71 @@ func (s *Service) GetFamilyByID(ctx context.Context, familyID uuid.UUID) (*Famil
 	return &family, nil
 }
 
+// UserFamilyInfo contains family info with user's role and member count
+type UserFamilyInfo struct {
+	Family      *Family
+	UserRole    string
+	MemberCount int
+}
+
+// GetUserFamiliesWithInfo retrieves families with enriched information for display
+func (s *Service) GetUserFamiliesWithInfo(ctx context.Context, userID uuid.UUID) ([]*UserFamilyInfo, error) {
+	ctx, span := tracer.Start(ctx, "families.GetUserFamiliesWithInfo")
+	defer span.End()
+
+	query := `
+		SELECT f.id, f.name, f.description, f.created_by, f.created_at, f.updated_at,
+		       fm.role,
+		       (SELECT COUNT(*) FROM family_members WHERE family_id = f.id) as member_count
+		FROM families f
+		INNER JOIN family_members fm ON f.id = fm.family_id
+		WHERE fm.user_id = $1
+		ORDER BY f.created_at DESC
+	`
+
+	rows, err := s.db.Query(ctx, query, userID)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to get user families with info: %w", err)
+	}
+	defer rows.Close()
+
+	var familiesInfo []*UserFamilyInfo
+	for rows.Next() {
+		var family Family
+		var userRole string
+		var memberCount int
+		
+		err := rows.Scan(
+			&family.ID,
+			&family.Name,
+			&family.Description,
+			&family.CreatedBy,
+			&family.CreatedAt,
+			&family.UpdatedAt,
+			&userRole,
+			&memberCount,
+		)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to scan family with info: %w", err)
+		}
+		
+		familiesInfo = append(familiesInfo, &UserFamilyInfo{
+			Family:      &family,
+			UserRole:    userRole,
+			MemberCount: memberCount,
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("error iterating over families with info: %w", err)
+	}
+
+	return familiesInfo, nil
+}
+
 // GetFamilyMemberUserIDs retrieves user IDs of all family members except the specified user
 func (s *Service) GetFamilyMemberUserIDs(ctx context.Context, familyID, excludeUserID uuid.UUID) ([]uuid.UUID, error) {
 	ctx, span := tracer.Start(ctx, "families.GetFamilyMemberUserIDs")

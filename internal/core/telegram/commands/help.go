@@ -53,6 +53,6 @@ func (c *HelpCommand) Handle(ctx context.Context, chatID int64, user *users.User
 		return err
 	}
 
-	c.SendMessage(chatID, message)
+	c.SendHTMLMessage(chatID, message)
 	return nil
 }

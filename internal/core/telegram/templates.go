@@ -7,6 +7,8 @@ import (
 	"html/template"
 	"path/filepath"
 	"time"
+
+	"github.com/PocketPalCo/shopping-service/internal/core/users"
 )
 
 //go:embed templates/**/*.html
@@ -57,6 +59,48 @@ func (tm *TemplateManager) RenderTemplate(templateName, locale string, data inte
 	return buf.String(), nil
 }
 
+// RenderButton renders a localized button text
+func (tm *TemplateManager) RenderButton(buttonName, locale string) string {
+	// Default to English if locale not supported
+	if _, exists := tm.templates[locale]; !exists {
+		locale = "en"
+	}
+
+	tmpl, exists := tm.templates[locale]
+	if !exists {
+		return buttonName // Fallback to button name if template not found
+	}
+
+	var buf bytes.Buffer
+	err := tmpl.ExecuteTemplate(&buf, "button_"+buttonName, nil)
+	if err != nil {
+		return buttonName // Fallback to button name if execution fails
+	}
+
+	return buf.String()
+}
+
+// RenderMessage renders a localized error or success message
+func (tm *TemplateManager) RenderMessage(messageName, locale string) string {
+	// Default to English if locale not supported
+	if _, exists := tm.templates[locale]; !exists {
+		locale = "en"
+	}
+
+	tmpl, exists := tm.templates[locale]
+	if !exists {
+		return messageName // Fallback to message name if template not found
+	}
+
+	var buf bytes.Buffer
+	err := tmpl.ExecuteTemplate(&buf, messageName, nil)
+	if err != nil {
+		return messageName // Fallback to message name if execution fails
+	}
+
+	return buf.String()
+}
+
 // GetSupportedLocales returns list of supported locales
 func (tm *TemplateManager) GetSupportedLocales() []string {
 	return []string{"en", "uk", "ru"}
@@ -102,7 +146,7 @@ type StatusTemplateData struct {
 }
 
 type UsersListTemplateData struct {
-	Users []User
+	Users []*users.User
 }
 
 type MyIDTemplateData struct {
