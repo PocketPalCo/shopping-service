@@ -10,6 +10,7 @@ import (
 	"github.com/PocketPalCo/shopping-service/internal/infra/postgres"
 	"github.com/PocketPalCo/shopping-service/internal/infra/server"
 	"github.com/PocketPalCo/shopping-service/pkg/logger"
+	"go.opentelemetry.io/otel/sdk/log"
 	"log/slog"
 )
 
@@ -21,9 +22,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize standard logger (OTLP logging temporarily disabled due to version conflicts)
-	defaultLogger := logger.NewLogger(&cfg)
-	slog.SetDefault(defaultLogger)
+	// Initialize OTLP-only logger
+	var loggerProvider *log.LoggerProvider
+	otlpLogger, loggerProvider, err := logger.NewOTLPOnlyLogger(&cfg)
+	if err != nil {
+		slog.Error("Failed to initialize OTLP logger", 
+			"error", err.Error(),
+			"service", "shopping-service",
+			"component", "logger")
+		os.Exit(1)
+	} else {
+		slog.SetDefault(otlpLogger)
+		slog.Info("OTLP-only logging enabled successfully", 
+			"endpoint", cfg.OtlpEndpoint,
+			"service", "shopping-service",
+			"component", "logger")
+		
+		// Store loggerProvider for cleanup (you might want to add this to your server struct)
+		_ = loggerProvider
+	}
 
 	slog.Info("Starting shopping service",
 		"component", "main",
@@ -69,5 +86,14 @@ func main() {
 	slog.Info("Shutdown signal received, stopping server", "component", "main")
 	mainServer.Shutdown()
 	conn.Close()
+	
+	// Cleanup OTLP logger provider if it was initialized
+	if loggerProvider != nil {
+		ctx := context.Background()
+		if err := loggerProvider.Shutdown(ctx); err != nil {
+			slog.Error("Failed to shutdown logger provider", "error", err.Error())
+		}
+	}
+	
 	slog.Info("Service shutdown complete", "component", "main")
 }

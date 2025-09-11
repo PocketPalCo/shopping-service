@@ -31,6 +31,7 @@ type ParsedItem struct {
 	Subcategory      *string   `json:"subcategory" db:"subcategory"`
 	QuantityValue    *float64  `json:"quantity_value" db:"quantity_value"`
 	QuantityUnit     *string   `json:"quantity_unit" db:"quantity_unit"`
+	Notes            *string   `json:"notes" db:"notes"`
 	LanguageCode     string    `json:"language_code" db:"language_code"`
 	ConfidenceScore  *float64  `json:"confidence_score" db:"confidence_score"`
 	CreatedAt        time.Time `json:"created_at" db:"created_at"`
@@ -55,15 +56,24 @@ type ParsedResult struct {
 	Subcategory      string     `json:"subcategory"`
 	QuantityValue    *float64   `json:"quantity_value,omitempty"`
 	QuantityUnit     string     `json:"quantity_unit"`
+	Notes            *string    `json:"notes,omitempty"`
 	ConfidenceScore  float64    `json:"confidence_score"`
 	OriginalItemID   *uuid.UUID `json:"original_item_id,omitempty"`
 	ParsedItemID     *uuid.UUID `json:"parsed_item_id,omitempty"`
+}
+
+type ProductListDetectionResult struct {
+	IsProductList       bool     `json:"is_product_list"`
+	Confidence          float64  `json:"confidence"`
+	DetectedItemsCount  int      `json:"detected_items_count"`
+	SampleItems         []string `json:"sample_items"`
 }
 
 type OpenAIClient interface {
 	ParseItem(ctx context.Context, rawText, languageCode string) (*ParsedResult, error)
 	ParseItems(ctx context.Context, rawText, languageCode string) ([]*ParsedResult, error)
 	DetectLanguage(ctx context.Context, text string) (string, error)
+	DetectProductList(ctx context.Context, text string) (*ProductListDetectionResult, error)
 }
 
 type Service struct {
@@ -192,10 +202,10 @@ func (s *Service) storeParsedItem(ctx context.Context, result *ParsedResult, lan
 	// Insert new parsed item
 	insertQuery := `
 		INSERT INTO parsed_items (standardized_name, category, subcategory, quantity_value, 
-		                         quantity_unit, language_code, confidence_score, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+		                         quantity_unit, notes, language_code, confidence_score, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
 		RETURNING id, standardized_name, category, subcategory, quantity_value, quantity_unit, 
-		         language_code, confidence_score, created_at, updated_at
+		         notes, language_code, confidence_score, created_at, updated_at
 	`
 
 	var item ParsedItem
@@ -205,6 +215,7 @@ func (s *Service) storeParsedItem(ctx context.Context, result *ParsedResult, lan
 		result.Subcategory,
 		result.QuantityValue,
 		result.QuantityUnit,
+		result.Notes,
 		languageCode,
 		result.ConfidenceScore,
 	).Scan(
@@ -214,6 +225,7 @@ func (s *Service) storeParsedItem(ctx context.Context, result *ParsedResult, lan
 		&item.Subcategory,
 		&item.QuantityValue,
 		&item.QuantityUnit,
+		&item.Notes,
 		&item.LanguageCode,
 		&item.ConfidenceScore,
 		&item.CreatedAt,
@@ -231,7 +243,7 @@ func (s *Service) createItemMapping(ctx context.Context, originalID, parsedID uu
 	query := `
 		INSERT INTO item_mappings (original_item_id, parsed_item_id, mapping_method, created_at, updated_at)
 		VALUES ($1, $2, $3, NOW(), NOW())
-		ON CONFLICT (original_item_id) DO NOTHING
+		ON CONFLICT (original_item_id, parsed_item_id) DO NOTHING
 	`
 
 	_, err := s.db.Exec(ctx, query, originalID, parsedID, method)
@@ -408,8 +420,7 @@ func (s *Service) storeItemMapping(ctx context.Context, originalItemID, parsedIt
 	query := `
 		INSERT INTO item_mappings (original_item_id, parsed_item_id, mapping_method, is_validated, created_at, updated_at)
 		VALUES ($1, $2, $3, false, NOW(), NOW())
-		ON CONFLICT (original_item_id) DO UPDATE SET
-			parsed_item_id = EXCLUDED.parsed_item_id,
+		ON CONFLICT (original_item_id, parsed_item_id) DO UPDATE SET
 			mapping_method = EXCLUDED.mapping_method,
 			updated_at = NOW()
 	`
@@ -436,4 +447,30 @@ func containsDigit(s string) bool {
 		}
 	}
 	return false
+}
+
+// DetectProductList uses AI to detect if the given text contains a product/shopping list
+func (s *Service) DetectProductList(ctx context.Context, text string) (*ProductListDetectionResult, error) {
+	ctx, span := tracer.Start(ctx, "ai.DetectProductList")
+	defer span.End()
+
+	result, err := s.openaiClient.DetectProductList(ctx, text)
+	if err != nil {
+		span.RecordError(err)
+		s.logger.Error("Failed to detect product list with AI", "error", err, "text", text)
+		return nil, fmt.Errorf("failed to detect product list: %w", err)
+	}
+
+	s.logger.Info("Successfully detected product list with AI",
+		"text", text,
+		"is_product_list", result.IsProductList,
+		"confidence", result.Confidence,
+		"detected_items_count", result.DetectedItemsCount)
+
+	return result, nil
+}
+
+// DetectLanguage detects the language of the given text using AI
+func (s *Service) DetectLanguage(ctx context.Context, text string) (string, error) {
+	return s.openaiClient.DetectLanguage(ctx, text)
 }

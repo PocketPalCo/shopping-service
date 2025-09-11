@@ -93,6 +93,11 @@ func (h *ListCallbackHandler) BuildListViewMessage(ctx context.Context, listID u
 				}
 			}
 
+			// Show notes if available (like "питьевой", "без ничего")
+			if item.Notes != nil && *item.Notes != "" {
+				itemText += fmt.Sprintf(" <i>— %s</i>", *item.Notes)
+			}
+
 			message += fmt.Sprintf("%d. %s\n", i+1, itemText)
 		}
 	}
@@ -284,4 +289,37 @@ func (h *ListCallbackHandler) HandleToggleItem(ctx context.Context, callback *tg
 
 	// Refresh the list view
 	h.HandleViewList(ctx, callback, listID, user)
+}
+
+// HandleListCallback handles list_* callbacks (moved from bot_service.go)
+func (h *ListCallbackHandler) HandleListCallback(ctx context.Context, callback *tgbotapi.CallbackQuery, parts []string, user *users.User, stateManager *StateManager) {
+	if len(parts) < 3 {
+		h.AnswerCallback(callback.ID, "❌ Invalid list callback.")
+		return
+	}
+
+	listIDStr := parts[2]
+	listID, err := uuid.Parse(listIDStr)
+	if err != nil {
+		h.logger.Error("Failed to parse list ID", "error", err, "list_id", listIDStr)
+		h.AnswerCallback(callback.ID, "❌ Invalid list ID.")
+		return
+	}
+
+	action := parts[1]
+	switch action {
+	case "view":
+		h.HandleViewList(ctx, callback, listID, user)
+	case "additem":
+		h.HandleAddItem(ctx, callback, listID, user)
+		if stateManager != nil {
+			stateManager.SetUserState(user.TelegramID, "adding_item_to_list", listID.String())
+		}
+	case "toggleitem":
+		if len(parts) >= 4 {
+			h.HandleToggleItem(ctx, callback, listID, parts[3], user)
+		}
+	default:
+		h.AnswerCallback(callback.ID, "❌ Unknown list action.")
+	}
 }

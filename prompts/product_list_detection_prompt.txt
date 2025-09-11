@@ -1,0 +1,20 @@
+Analyze the following text and determine if it contains a shopping/product list. 
+
+Consider these criteria:
+- Contains multiple items (food, household goods, etc.)
+- Items might be separated by commas, newlines, or dashes
+- Items might include quantities (2kg, 1L, 3 pieces, etc.)
+- Could be in different languages (English, Russian, Ukrainian)
+- Should have at least 2 recognizable products
+
+Text to analyze: "{text}"
+
+Respond with ONLY a JSON object:
+{
+  "is_product_list": true/false,
+  "confidence": 0.0-1.0,
+  "detected_items_count": number,
+  "sample_items": ["item1", "item2", "item3"]
+}
+
+Response format: Only JSON, no additional text.

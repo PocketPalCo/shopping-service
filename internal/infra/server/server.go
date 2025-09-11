@@ -80,6 +80,20 @@ func New(ctx context.Context, cfg *config.Config, dbConn *pgxpool.Pool) *Server 
 		return nil
 	}
 
+	// Initialize HTTP metrics
+	err = telemetry.InitHTTPMetrics(provider)
+	if err != nil {
+		slog.Error("failed to initialize HTTP metrics", slog.String("error", err.Error()))
+		return nil
+	}
+
+	// Initialize business metrics
+	err = telemetry.InitBusinessMetrics(provider)
+	if err != nil {
+		slog.Error("failed to initialize business metrics", slog.String("error", err.Error()))
+		return nil
+	}
+
 	instrumentedConn, err := telemetry.NewInstrumentedPool(provider, dbConn)
 	if err != nil {
 		slog.Error("failed to create instrumented pool", slog.String("error", err.Error()))

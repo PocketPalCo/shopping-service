@@ -9,9 +9,12 @@ import (
 	"time"
 
 	"github.com/PocketPalCo/shopping-service/internal/core/ai"
+	"github.com/PocketPalCo/shopping-service/pkg/telemetry"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	api "go.opentelemetry.io/otel/metric"
 )
 
 var tracer = otel.Tracer("shopping-service")
@@ -32,6 +35,7 @@ type ShoppingItem struct {
 	ListID         uuid.UUID  `json:"list_id" db:"list_id"`
 	Name           string     `json:"name" db:"name"`
 	Quantity       *string    `json:"quantity" db:"quantity"`
+	Notes          *string    `json:"notes" db:"notes"`               // Additional notes like "питьевой", "без ничего" 
 	IsCompleted    bool       `json:"is_completed" db:"is_completed"`
 	AddedBy        uuid.UUID  `json:"added_by" db:"added_by"`
 	CompletedBy    *uuid.UUID `json:"completed_by" db:"completed_by"`
@@ -66,6 +70,8 @@ type CreateShoppingListRequest struct {
 type AIService interface {
 	GetOrCreateParsedItem(ctx context.Context, rawText, languageCode string, userID uuid.UUID) (*ai.ParsedResult, error)
 	ParseAndStoreItems(ctx context.Context, rawText, languageCode string, userID uuid.UUID) ([]*ai.ParsedResult, error)
+	DetectProductList(ctx context.Context, text string) (*ai.ProductListDetectionResult, error)
+	DetectLanguage(ctx context.Context, text string) (string, error)
 }
 
 type Service struct {
@@ -113,7 +119,29 @@ func (s *Service) CreateShoppingList(ctx context.Context, req CreateShoppingList
 
 	if err != nil {
 		span.RecordError(err)
+		// Record error metric
+		if telemetry.ShoppingListOperations != nil {
+			telemetry.ShoppingListOperations.Add(ctx, 1, 
+				api.WithAttributes(
+					attribute.String("operation", "create"),
+					attribute.String("status", "error"),
+				))
+		}
 		return nil, fmt.Errorf("failed to create shopping list: %w", err)
+	}
+
+	// Record success metric
+	if telemetry.ShoppingListOperations != nil {
+		telemetry.ShoppingListOperations.Add(ctx, 1, 
+			api.WithAttributes(
+				attribute.String("operation", "create"),
+				attribute.String("status", "success"),
+			))
+	}
+	
+	// Update active lists counter
+	if telemetry.ShoppingListsActive != nil {
+		telemetry.ShoppingListsActive.Add(ctx, 1)
 	}
 
 	return &list, nil
@@ -346,7 +374,25 @@ func (s *Service) AddItemToListWithLanguage(ctx context.Context, listID uuid.UUI
 
 	if err != nil {
 		span.RecordError(err)
+		// Record error metric
+		if telemetry.ShoppingItemOperations != nil {
+			telemetry.ShoppingItemOperations.Add(ctx, 1, 
+				api.WithAttributes(
+					attribute.String("operation", "add"),
+					attribute.String("status", "error"),
+				))
+		}
 		return nil, fmt.Errorf("failed to add item to list: %w", err)
+	}
+
+	// Record success metric
+	if telemetry.ShoppingItemOperations != nil {
+		telemetry.ShoppingItemOperations.Add(ctx, 1, 
+			api.WithAttributes(
+				attribute.String("operation", "add"),
+				attribute.String("status", "success"),
+				attribute.String("parsing_status", parsingStatus),
+			))
 	}
 
 	return &item, nil
@@ -357,7 +403,7 @@ func (s *Service) GetListItems(ctx context.Context, listID uuid.UUID) ([]*Shoppi
 	defer span.End()
 
 	query := `
-		SELECT id, list_id, name, quantity, is_completed, added_by, completed_by, completed_at,
+		SELECT id, list_id, name, quantity, notes, is_completed, added_by, completed_by, completed_at,
 		       original_item_id, parsed_item_id, display_name, parsed_name, parsing_status,
 		       created_at, updated_at
 		FROM shopping_items 
@@ -380,6 +426,7 @@ func (s *Service) GetListItems(ctx context.Context, listID uuid.UUID) ([]*Shoppi
 			&item.ListID,
 			&item.Name,
 			&item.Quantity,
+			&item.Notes,
 			&item.IsCompleted,
 			&item.AddedBy,
 			&item.CompletedBy,
@@ -420,11 +467,39 @@ func (s *Service) CompleteItem(ctx context.Context, itemID uuid.UUID, completedB
 	result, err := s.db.Exec(ctx, query, itemID, completedBy)
 	if err != nil {
 		span.RecordError(err)
+		// Record error metric
+		if telemetry.ShoppingItemOperations != nil {
+			telemetry.ShoppingItemOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "complete"),
+					attribute.String("status", "error"),
+				),
+			)
+		}
 		return fmt.Errorf("failed to complete item %d: %w", itemID, err)
 	}
 
 	if result.RowsAffected() == 0 {
+		// Record not found metric
+		if telemetry.ShoppingItemOperations != nil {
+			telemetry.ShoppingItemOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "complete"),
+					attribute.String("status", "not_found"),
+				),
+			)
+		}
 		return fmt.Errorf("item with ID %d not found", itemID)
+	}
+
+	// Record success metric
+	if telemetry.ShoppingItemOperations != nil {
+		telemetry.ShoppingItemOperations.Add(ctx, 1,
+			api.WithAttributes(
+				attribute.String("operation", "complete"),
+				attribute.String("status", "success"),
+			),
+		)
 	}
 
 	return nil
@@ -443,11 +518,39 @@ func (s *Service) UncompleteItem(ctx context.Context, itemID uuid.UUID) error {
 	result, err := s.db.Exec(ctx, query, itemID)
 	if err != nil {
 		span.RecordError(err)
+		// Record error metric
+		if telemetry.ShoppingItemOperations != nil {
+			telemetry.ShoppingItemOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "uncomplete"),
+					attribute.String("status", "error"),
+				),
+			)
+		}
 		return fmt.Errorf("failed to uncomplete item %d: %w", itemID, err)
 	}
 
 	if result.RowsAffected() == 0 {
+		// Record not found metric
+		if telemetry.ShoppingItemOperations != nil {
+			telemetry.ShoppingItemOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "uncomplete"),
+					attribute.String("status", "not_found"),
+				),
+			)
+		}
 		return fmt.Errorf("item with ID %d not found", itemID)
+	}
+
+	// Record success metric
+	if telemetry.ShoppingItemOperations != nil {
+		telemetry.ShoppingItemOperations.Add(ctx, 1,
+			api.WithAttributes(
+				attribute.String("operation", "uncomplete"),
+				attribute.String("status", "success"),
+			),
+		)
 	}
 
 	return nil
@@ -462,11 +565,39 @@ func (s *Service) DeleteItem(ctx context.Context, itemID uuid.UUID) error {
 	result, err := s.db.Exec(ctx, query, itemID)
 	if err != nil {
 		span.RecordError(err)
+		// Record error metric
+		if telemetry.ShoppingItemOperations != nil {
+			telemetry.ShoppingItemOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "delete"),
+					attribute.String("status", "error"),
+				),
+			)
+		}
 		return fmt.Errorf("failed to delete item %d: %w", itemID, err)
 	}
 
 	if result.RowsAffected() == 0 {
+		// Record not found metric
+		if telemetry.ShoppingItemOperations != nil {
+			telemetry.ShoppingItemOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "delete"),
+					attribute.String("status", "not_found"),
+				),
+			)
+		}
 		return fmt.Errorf("item with ID %d not found", itemID)
+	}
+
+	// Record success metric
+	if telemetry.ShoppingItemOperations != nil {
+		telemetry.ShoppingItemOperations.Add(ctx, 1,
+			api.WithAttributes(
+				attribute.String("operation", "delete"),
+				attribute.String("status", "success"),
+			),
+		)
 	}
 
 	return nil
@@ -480,6 +611,15 @@ func (s *Service) DeleteShoppingList(ctx context.Context, listID uuid.UUID) erro
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		span.RecordError(err)
+		// Record transaction start error metric
+		if telemetry.ShoppingListOperations != nil {
+			telemetry.ShoppingListOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "delete"),
+					attribute.String("status", "transaction_start_error"),
+				),
+			)
+		}
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
@@ -488,6 +628,15 @@ func (s *Service) DeleteShoppingList(ctx context.Context, listID uuid.UUID) erro
 	_, err = tx.Exec(ctx, "DELETE FROM shopping_items WHERE list_id = $1", listID)
 	if err != nil {
 		span.RecordError(err)
+		// Record items deletion error metric
+		if telemetry.ShoppingListOperations != nil {
+			telemetry.ShoppingListOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "delete"),
+					attribute.String("status", "items_delete_error"),
+				),
+			)
+		}
 		return fmt.Errorf("failed to delete shopping items: %w", err)
 	}
 
@@ -495,10 +644,28 @@ func (s *Service) DeleteShoppingList(ctx context.Context, listID uuid.UUID) erro
 	result, err := tx.Exec(ctx, "DELETE FROM shopping_lists WHERE id = $1", listID)
 	if err != nil {
 		span.RecordError(err)
+		// Record list deletion error metric
+		if telemetry.ShoppingListOperations != nil {
+			telemetry.ShoppingListOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "delete"),
+					attribute.String("status", "list_delete_error"),
+				),
+			)
+		}
 		return fmt.Errorf("failed to delete shopping list: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {
+		// Record not found metric
+		if telemetry.ShoppingListOperations != nil {
+			telemetry.ShoppingListOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "delete"),
+					attribute.String("status", "not_found"),
+				),
+			)
+		}
 		return fmt.Errorf("shopping list with ID %d not found", listID)
 	}
 
@@ -506,7 +673,26 @@ func (s *Service) DeleteShoppingList(ctx context.Context, listID uuid.UUID) erro
 	err = tx.Commit(ctx)
 	if err != nil {
 		span.RecordError(err)
+		// Record transaction error metric
+		if telemetry.ShoppingListOperations != nil {
+			telemetry.ShoppingListOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "delete"),
+					attribute.String("status", "transaction_error"),
+				),
+			)
+		}
 		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Record success metric
+	if telemetry.ShoppingListOperations != nil {
+		telemetry.ShoppingListOperations.Add(ctx, 1,
+			api.WithAttributes(
+				attribute.String("operation", "delete"),
+				attribute.String("status", "success"),
+			),
+		)
 	}
 
 	return nil
@@ -724,10 +910,10 @@ func (s *Service) AddParsedItemsToList(ctx context.Context, listID uuid.UUID, pa
 
 		// Create shopping item with AI parsing data
 		query := `
-			INSERT INTO shopping_items (list_id, name, quantity, is_completed, added_by, 
+			INSERT INTO shopping_items (list_id, name, quantity, notes, is_completed, added_by, 
 			                           original_item_id, parsed_item_id, display_name, parsed_name, parsing_status, created_at, updated_at)
-			VALUES ($1, $2, $3, false, $4, $5, $6, $7, $8, 'parsed', NOW(), NOW())
-			RETURNING id, list_id, name, quantity, is_completed, added_by, completed_by, completed_at,
+			VALUES ($1, $2, $3, $4, false, $5, $6, $7, $8, $9, 'parsed', NOW(), NOW())
+			RETURNING id, list_id, name, quantity, notes, is_completed, added_by, completed_by, completed_at,
 			         original_item_id, parsed_item_id, display_name, parsed_name, parsing_status,
 			         created_at, updated_at
 		`
@@ -740,9 +926,9 @@ func (s *Service) AddParsedItemsToList(ctx context.Context, listID uuid.UUID, pa
 			quantityParam = &quantityStr
 		}
 
-		err := s.db.QueryRow(ctx, query, listID, itemName, quantityParam, addedBy,
+		err := s.db.QueryRow(ctx, query, listID, itemName, quantityParam, parsedResult.Notes, addedBy,
 			parsedResult.OriginalItemID, parsedResult.ParsedItemID, displayName, parsedName).Scan(
-			&item.ID, &item.ListID, &item.Name, &item.Quantity, &item.IsCompleted,
+			&item.ID, &item.ListID, &item.Name, &item.Quantity, &item.Notes, &item.IsCompleted,
 			&item.AddedBy, &item.CompletedBy, &item.CompletedAt,
 			&item.OriginalItemID, &item.ParsedItemID, &item.DisplayName, &item.ParsedName, &item.ParsingStatus,
 			&item.CreatedAt, &item.UpdatedAt,
@@ -923,4 +1109,37 @@ func (s *Service) UpdateShoppingItem(ctx context.Context, itemID uuid.UUID, req 
 // GetShoppingList retrieves a shopping list by ID (alias for GetShoppingListByID)
 func (s *Service) GetShoppingList(ctx context.Context, listID uuid.UUID) (*ShoppingList, error) {
 	return s.GetShoppingListByID(ctx, listID)
+}
+
+// DetectProductList detects if the given text contains a product/shopping list using AI
+func (s *Service) DetectProductList(ctx context.Context, text string) (*ai.ProductListDetectionResult, error) {
+	ctx, span := tracer.Start(ctx, "shopping.DetectProductList")
+	defer span.End()
+
+	if s.aiService == nil {
+		s.logger.Error("AI service is not available for product list detection")
+		return nil, fmt.Errorf("AI service is not available")
+	}
+
+	result, err := s.aiService.DetectProductList(ctx, text)
+	if err != nil {
+		s.logger.Error("Failed to detect product list", "error", err, "text", text)
+		return nil, fmt.Errorf("failed to detect product list: %w", err)
+	}
+
+	s.logger.Info("Successfully detected product list",
+		"text", text,
+		"is_product_list", result.IsProductList,
+		"confidence", result.Confidence,
+		"detected_items_count", result.DetectedItemsCount)
+
+	return result, nil
+}
+
+// DetectLanguage detects the language of the given text using AI
+func (s *Service) DetectLanguage(ctx context.Context, text string) (string, error) {
+	ctx, span := tracer.Start(ctx, "shopping.DetectLanguage")
+	defer span.End()
+
+	return s.aiService.DetectLanguage(ctx, text)
 }

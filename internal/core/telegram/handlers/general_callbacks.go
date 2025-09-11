@@ -46,7 +46,9 @@ func (h *GeneralCallbackHandler) HandleCreateNewList(ctx context.Context, callba
 			message,
 		)
 		editMsg.ParseMode = tgbotapi.ModeHTML
-		h.bot.Send(editMsg)
+		if _, err := h.bot.Send(editMsg); err != nil {
+			h.logger.Error("Failed to send edit message", "error", err)
+		}
 		return
 	}
 
@@ -118,7 +120,9 @@ func (h *GeneralCallbackHandler) HandleShowAllLists(ctx context.Context, callbac
 			message,
 		)
 		editMsg.ParseMode = tgbotapi.ModeHTML
-		h.bot.Send(editMsg)
+		if _, err := h.bot.Send(editMsg); err != nil {
+			h.logger.Error("Failed to send edit message", "error", err)
+		}
 		return
 	}
 
@@ -321,4 +325,19 @@ func (h *GeneralCallbackHandler) HandleCompactListItem(ctx context.Context, call
 	// Delegate to the list callback handler for toggling the item
 	listHandler := NewListCallbackHandler(h.BaseHandler)
 	listHandler.HandleToggleItem(ctx, callback, targetListID, targetItemID.String(), user)
+}
+
+// HandleShowCallback handles show_* callbacks (moved from bot_service.go)
+func (h *GeneralCallbackHandler) HandleShowCallback(ctx context.Context, callback *tgbotapi.CallbackQuery, parts []string, user *users.User) {
+	if len(parts) < 2 {
+		h.AnswerCallback(callback.ID, "❌ Invalid show callback.")
+		return
+	}
+
+	switch parts[1] {
+	case "all", "lists":
+		h.HandleShowAllLists(ctx, callback, user)
+	default:
+		h.AnswerCallback(callback.ID, "❌ Unknown show action.")
+	}
 }

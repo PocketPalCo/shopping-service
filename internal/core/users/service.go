@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/PocketPalCo/shopping-service/pkg/telemetry"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	api "go.opentelemetry.io/otel/metric"
 )
 
 var tracer = otel.Tracer("users-service")
@@ -124,7 +127,27 @@ func (s *Service) CreateUser(ctx context.Context, req AuthorizationRequest) (*Us
 
 	if err != nil {
 		span.RecordError(err)
+		// Record error metric
+		if telemetry.UserOperationsTotal != nil {
+			telemetry.UserOperationsTotal.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "create"),
+					attribute.String("status", "error"),
+				),
+			)
+		}
 		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	// Record success metric
+	if telemetry.UserOperationsTotal != nil {
+		telemetry.UserOperationsTotal.Add(ctx, 1,
+			api.WithAttributes(
+				attribute.String("operation", "create"),
+				attribute.String("status", "success"),
+				attribute.String("locale", locale),
+			),
+		)
 	}
 
 	return &user, nil
@@ -143,11 +166,39 @@ func (s *Service) AuthorizeUser(ctx context.Context, telegramID int64) error {
 	result, err := s.db.Exec(ctx, query, telegramID)
 	if err != nil {
 		span.RecordError(err)
+		// Record error metric
+		if telemetry.UserOperationsTotal != nil {
+			telemetry.UserOperationsTotal.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "authorize"),
+					attribute.String("status", "error"),
+				),
+			)
+		}
 		return fmt.Errorf("failed to authorize user %d: %w", telegramID, err)
 	}
 
 	if result.RowsAffected() == 0 {
+		// Record not found metric
+		if telemetry.UserOperationsTotal != nil {
+			telemetry.UserOperationsTotal.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "authorize"),
+					attribute.String("status", "not_found"),
+				),
+			)
+		}
 		return fmt.Errorf("user with telegram_id %d not found", telegramID)
+	}
+
+	// Record success metric
+	if telemetry.UserOperationsTotal != nil {
+		telemetry.UserOperationsTotal.Add(ctx, 1,
+			api.WithAttributes(
+				attribute.String("operation", "authorize"),
+				attribute.String("status", "success"),
+			),
+		)
 	}
 
 	return nil
@@ -166,11 +217,39 @@ func (s *Service) RevokeUser(ctx context.Context, telegramID int64) error {
 	result, err := s.db.Exec(ctx, query, telegramID)
 	if err != nil {
 		span.RecordError(err)
+		// Record error metric
+		if telemetry.UserOperationsTotal != nil {
+			telemetry.UserOperationsTotal.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "revoke"),
+					attribute.String("status", "error"),
+				),
+			)
+		}
 		return fmt.Errorf("failed to revoke user %d: %w", telegramID, err)
 	}
 
 	if result.RowsAffected() == 0 {
+		// Record not found metric
+		if telemetry.UserOperationsTotal != nil {
+			telemetry.UserOperationsTotal.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "revoke"),
+					attribute.String("status", "not_found"),
+				),
+			)
+		}
 		return fmt.Errorf("user with telegram_id %d not found", telegramID)
+	}
+
+	// Record success metric
+	if telemetry.UserOperationsTotal != nil {
+		telemetry.UserOperationsTotal.Add(ctx, 1,
+			api.WithAttributes(
+				attribute.String("operation", "revoke"),
+				attribute.String("status", "success"),
+			),
+		)
 	}
 
 	return nil

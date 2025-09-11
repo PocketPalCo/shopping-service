@@ -6,14 +6,23 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/PocketPalCo/shopping-service/internal/core/ai"
+	"github.com/PocketPalCo/shopping-service/internal/core/families"
 	"github.com/PocketPalCo/shopping-service/internal/core/language"
 	"github.com/PocketPalCo/shopping-service/internal/core/shopping"
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/google/uuid"
 )
+
+// ProductListDetectedTemplateData holds data for product list detection templates
+type ProductListDetectedTemplateData struct {
+	DetectedItemsCount int
+	ConfidencePercent  float64
+	SampleItemsStr     string
+}
 
 // MessageHandler handles different types of messages
 type MessageHandler struct {
@@ -287,9 +296,93 @@ func (h *MessageHandler) HandleAddItemInput(ctx context.Context, message *tgbota
 
 // HandleAuthorizedMessage processes messages from authorized users
 func (h *MessageHandler) HandleAuthorizedMessage(ctx context.Context, message *tgbotapi.Message, user *users.User) {
-	// TODO: Check for user states and delegate to appropriate handlers
-	// For now, just acknowledge the message
-	h.SendMessage(message.Chat.ID, "✅ Message received! Use /lists to manage your shopping lists or /help to see available commands.")
+	// Check for user states and delegate to appropriate handlers - check if user has any active states
+	allStates := h.stateManager.GetAllStates()
+	userPrefix := fmt.Sprintf("%d:", user.TelegramID)
+	hasActiveState := false
+	for key := range allStates {
+		if strings.HasPrefix(key, userPrefix) {
+			hasActiveState = true
+			break
+		}
+	}
+	
+	if hasActiveState {
+		// User has an active state, handle it accordingly
+		// This would need to be implemented based on the state
+		h.logger.Info("User has active state, handling accordingly", "user_id", user.ID)
+		// For now, let's not process product list detection when user has an active state
+		messageText, err := h.templateManager.RenderTemplate("message_received", user.Locale, nil)
+		if err != nil {
+			h.logger.Error("Failed to render message received template", "error", err)
+			messageText = "✅ Message received! Use /lists to manage your shopping lists or /help to see available commands."
+		}
+		h.SendMessage(message.Chat.ID, messageText)
+		return
+	}
+
+	// No active state, check if message contains a product list
+	messageText := strings.TrimSpace(message.Text)
+	if messageText == "" {
+		messageText, err := h.templateManager.RenderTemplate("message_received", user.Locale, nil)
+		if err != nil {
+			h.logger.Error("Failed to render message received template", "error", err)
+			messageText = "✅ Message received! Use /lists to manage your shopping lists or /help to see available commands."
+		}
+		h.SendMessage(message.Chat.ID, messageText)
+		return
+	}
+
+	// Skip obvious commands or short messages
+	if strings.HasPrefix(messageText, "/") || len(messageText) < 10 {
+		messageText, err := h.templateManager.RenderTemplate("message_received", user.Locale, nil)
+		if err != nil {
+			h.logger.Error("Failed to render message received template", "error", err)
+			messageText = "✅ Message received! Use /lists to manage your shopping lists or /help to see available commands."
+		}
+		h.SendMessage(message.Chat.ID, messageText)
+		return
+	}
+
+	// Use AI to detect if this is a product list
+	h.logger.Info("Analyzing text for product list detection",
+		"user_id", user.ID,
+		"text_length", len(messageText),
+		"text_preview", messageText[:min(50, len(messageText))]+"...")
+
+	productListResult, err := h.shoppingService.DetectProductList(ctx, messageText)
+	if err != nil {
+		h.logger.Error("Failed to detect product list", "error", err, "user_id", user.ID)
+		messageText, err := h.templateManager.RenderTemplate("message_received", user.Locale, nil)
+		if err != nil {
+			h.logger.Error("Failed to render message received template", "error", err)
+			messageText = "✅ Message received! Use /lists to manage your shopping lists or /help to see available commands."
+		}
+		h.SendMessage(message.Chat.ID, messageText)
+		return
+	}
+
+	// Log the detection result
+	h.logger.Info("Product list detection completed",
+		"user_id", user.ID,
+		"is_product_list", productListResult.IsProductList,
+		"confidence", productListResult.Confidence,
+		"detected_items", productListResult.DetectedItemsCount,
+		"sample_items", productListResult.SampleItems)
+
+	// If not a product list or confidence is too low, send default message
+	if !productListResult.IsProductList || productListResult.Confidence < 0.6 {
+		messageText, err := h.templateManager.RenderTemplate("message_received", user.Locale, nil)
+		if err != nil {
+			h.logger.Error("Failed to render message received template", "error", err)
+			messageText = "✅ Message received! Use /lists to manage your shopping lists or /help to see available commands."
+		}
+		h.SendMessage(message.Chat.ID, messageText)
+		return
+	}
+
+	// It's a product list! Now check if user has families
+	h.handleProductListDetected(ctx, message, user, messageText, productListResult)
 }
 
 // SendUnauthorizedMessage sends a message to unauthorized users
@@ -418,4 +511,148 @@ type DuplicateState struct {
 type DuplicateItemInfoWithResolution struct {
 	*shopping.DuplicateItemInfo
 	Resolved bool `json:"resolved"`
+}
+
+// min returns the smaller of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// handleProductListDetected handles when a product list is detected in user's message
+func (h *MessageHandler) handleProductListDetected(ctx context.Context, message *tgbotapi.Message, user *users.User, messageText string, productListResult *ai.ProductListDetectionResult) {
+	// Check if user belongs to any families
+	userFamilies, err := h.familiesService.GetUserFamilies(ctx, user.ID)
+	if err != nil {
+		h.logger.Error("Failed to get user families", "error", err, "user_id", user.ID)
+		h.sendFallbackMessage(message.Chat.ID, user)
+		return
+	}
+
+	if len(userFamilies) == 0 {
+		// User has no families, send fallback message
+		h.logger.Info("User has no families, sending fallback message", "user_id", user.ID)
+		h.sendFallbackMessage(message.Chat.ID, user)
+		return
+	}
+
+	// User has families! Show them options to add to existing list or create new one
+	h.logger.Info("Product list detected for user with families",
+		"user_id", user.ID,
+		"families_count", len(userFamilies),
+		"detected_items", productListResult.DetectedItemsCount,
+		"confidence", productListResult.Confidence)
+
+	// Show options to user
+	h.showProductListOptions(ctx, message.Chat.ID, user, messageText, productListResult, userFamilies)
+}
+
+// sendFallbackMessage sends a fallback message for users without families
+func (h *MessageHandler) sendFallbackMessage(chatID int64, user *users.User) {
+	message, err := h.templateManager.RenderTemplate("product_list_fallback", user.Locale, nil)
+	if err != nil {
+		h.logger.Error("Failed to render product list fallback template", "error", err)
+		message = "🛒 Shopping List Detected! To use this feature, you need to be part of a family. Use /families to create or join a family."
+	}
+
+	h.SendMessage(chatID, message)
+}
+
+// showProductListOptions shows options to add items to existing lists or create a new list
+func (h *MessageHandler) showProductListOptions(ctx context.Context, chatID int64, user *users.User, messageText string, productListResult *ai.ProductListDetectionResult, userFamilies []*families.Family) {
+	// Get user's shopping lists for their families
+	var availableLists []*shopping.ShoppingList
+	
+	for _, family := range userFamilies {
+		familyLists, err := h.shoppingService.GetFamilyShoppingLists(ctx, family.ID)
+		if err != nil {
+			h.logger.Error("Failed to get family shopping lists", "error", err, "family_id", family.ID)
+			continue
+		}
+		availableLists = append(availableLists, familyLists...)
+	}
+
+	// Create message with detected items
+	sampleItemsStr := "unknown items"
+	if len(productListResult.SampleItems) > 0 {
+		sampleItemsStr = strings.Join(productListResult.SampleItems[:min(3, len(productListResult.SampleItems))], ", ")
+		if len(productListResult.SampleItems) > 3 {
+			sampleItemsStr += "..."
+		}
+	}
+
+	// Create template data
+	templateData := ProductListDetectedTemplateData{
+		DetectedItemsCount: productListResult.DetectedItemsCount,
+		ConfidencePercent:  productListResult.Confidence * 100,
+		SampleItemsStr:     sampleItemsStr,
+	}
+
+	messageContent, err := h.templateManager.RenderTemplate("product_list_detected", user.Locale, templateData)
+	if err != nil {
+		h.logger.Error("Failed to render product list detected template", "error", err)
+		messageContent = fmt.Sprintf("🛒 Shopping List Detected! Found %d items with %.1f%% confidence. Items like: %s",
+			productListResult.DetectedItemsCount, 
+			productListResult.Confidence*100,
+			sampleItemsStr)
+	}
+
+	var buttons [][]tgbotapi.InlineKeyboardButton
+
+	// Show existing lists if available
+	if len(availableLists) > 0 && len(availableLists) <= 5 { // Limit to 5 lists to avoid keyboard being too big
+		for _, list := range availableLists {
+			buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
+				tgbotapi.NewInlineKeyboardButtonData(
+					fmt.Sprintf("➕ Add to '%s'", list.Name),
+					fmt.Sprintf("productlist_addto_%s", list.ID.String()[:8]),
+				),
+			})
+		}
+	}
+
+	// Option to create a new list with automatic name
+	currentDate := time.Now().Format("Jan 02")
+	autoName := fmt.Sprintf("Shopping %s", currentDate)
+	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData(
+			fmt.Sprintf("📝 Create '%s'", autoName),
+			fmt.Sprintf("productlist_create_auto_%s", currentDate),
+		),
+	})
+
+	// Option to create a new list with custom name
+	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData(
+			"📝 Create with Custom Name",
+			"productlist_create_custom",
+		),
+	})
+
+	// Cancel option
+	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData("❌ Cancel", "productlist_cancel"),
+	})
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+	// Store the message text in user state for later processing
+	stateData := map[string]interface{}{
+		"message_text":       messageText,
+		"detection_result":   productListResult,
+		"available_families": userFamilies,
+	}
+	
+	stateJSON, err := json.Marshal(stateData)
+	if err != nil {
+		h.logger.Error("Failed to marshal product list state", "error", err)
+		h.SendMessage(chatID, "❌ Failed to process your shopping list. Please try again.")
+		return
+	}
+
+	h.stateManager.SetUserState(user.TelegramID, "product_list_selection", string(stateJSON))
+
+	h.SendMessageWithKeyboard(chatID, messageContent, keyboard)
 }

@@ -1,0 +1,27 @@
+## Russian Language Examples (ru):
+
+### Basic Items:
+- "молоко" → {"standardized_name": "молоко", "category": "dairy", "subcategory": "milk", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "хлеб" → {"standardized_name": "хлеб", "category": "bakery", "subcategory": "bread", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "яблоки" → {"standardized_name": "яблоки", "category": "produce", "subcategory": "fruits", "quantity_unit": "pieces", "confidence_score": 0.95}
+
+### With Quantities:
+- "молоко 1л" → {"standardized_name": "молоко", "category": "dairy", "subcategory": "milk", "quantity_value": 1.0, "quantity_unit": "L", "confidence_score": 0.95}
+- "курица 2кг" → {"standardized_name": "курица", "category": "meat", "subcategory": "chicken", "quantity_value": 2.0, "quantity_unit": "kg", "confidence_score": 0.95}
+- "мясо (500г)" → {"standardized_name": "мясо", "category": "meat", "subcategory": "beef", "quantity_value": 500.0, "quantity_unit": "g", "confidence_score": 0.9}
+- "морковка 0,5 кг" → {"standardized_name": "морковка", "category": "produce", "subcategory": "vegetables", "quantity_value": 0.5, "quantity_unit": "kg", "confidence_score": 0.95}
+- "мука 1,5 кг" → {"standardized_name": "мука", "category": "pantry", "subcategory": "flour", "quantity_value": 1.5, "quantity_unit": "kg", "confidence_score": 0.95}
+
+### Common Variations:
+- "кофе" → {"standardized_name": "кофе", "category": "beverages", "subcategory": "coffee", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "помидоры" → {"standardized_name": "помидоры", "category": "produce", "subcategory": "vegetables", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "сыр" → {"standardized_name": "сыр", "category": "dairy", "subcategory": "cheese", "quantity_unit": "pieces", "confidence_score": 0.95}
+
+### Regional Variations:
+- "творог" → {"standardized_name": "творог", "category": "dairy", "subcategory": "cottage_cheese", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "сметана" → {"standardized_name": "сметана", "category": "dairy", "subcategory": "sour_cream", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "колбаса" → {"standardized_name": "колбаса", "category": "meat", "subcategory": "sausage", "quantity_unit": "pieces", "confidence_score": 0.95}
+
+### Complex Multi-Item Examples:
+- "мочалки для посуды. овощи- 3 огурца" → [{"standardized_name": "мочалки для посуды", "category": "household"}, {"standardized_name": "огурцы", "quantity_value": 3.0, "quantity_unit": "pieces"}]
+- "хлеб 2 батона и молоко 1л" → [{"standardized_name": "хлеб", "quantity_value": 2.0, "quantity_unit": "pieces"}, {"standardized_name": "молоко", "quantity_value": 1.0, "quantity_unit": "L"}]

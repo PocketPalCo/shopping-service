@@ -1,0 +1,20 @@
+## English Language Examples:
+
+### Basic Items:
+- "milk" → {"standardized_name": "milk", "category": "dairy", "subcategory": "milk", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "bread" → {"standardized_name": "bread", "category": "bakery", "subcategory": "bread", "quantity_unit": "pieces", "confidence_score": 0.95}
+- "apples" → {"standardized_name": "apples", "category": "produce", "subcategory": "fruits", "quantity_unit": "pieces", "confidence_score": 0.95}
+
+### With Quantities:
+- "milk 2L" → {"standardized_name": "milk", "category": "dairy", "subcategory": "milk", "quantity_value": 2.0, "quantity_unit": "L", "confidence_score": 0.95}
+- "chicken 1kg" → {"standardized_name": "chicken", "category": "meat", "subcategory": "chicken", "quantity_value": 1.0, "quantity_unit": "kg", "confidence_score": 0.95}
+- "apples (2 bags)" → {"standardized_name": "apples", "category": "produce", "subcategory": "fruits", "quantity_value": 2.0, "quantity_unit": "bags", "confidence_score": 0.95}
+
+### Common Typos/Variations:
+- "coffe" → {"standardized_name": "coffee", "category": "beverages", "subcategory": "coffee", "quantity_unit": "pieces", "confidence_score": 0.9}
+- "tomatoe" → {"standardized_name": "tomato", "category": "produce", "subcategory": "vegetables", "quantity_unit": "pieces", "confidence_score": 0.9}
+- "chiken" → {"standardized_name": "chicken", "category": "meat", "subcategory": "chicken", "quantity_unit": "pieces", "confidence_score": 0.85}
+
+### Ambiguous Cases:
+- "raw" → {"standardized_name": "milk", "category": "dairy", "subcategory": "milk", "quantity_unit": "pieces", "confidence_score": 0.7}
+- "green" → {"standardized_name": "lettuce", "category": "produce", "subcategory": "vegetables", "quantity_unit": "pieces", "confidence_score": 0.6}

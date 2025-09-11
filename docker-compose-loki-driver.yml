@@ -1,0 +1,37 @@
+# Alternative Docker Compose with Loki logging driver
+version: '3.8'
+
+services:
+  shopping-service:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - SSV_LOG_FORMAT=json
+      - SSV_LOG_LEVEL=info
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"
+        loki-batch-size: "100"
+        loki-timeout: "3s" 
+        labels: |
+          service=shopping-service
+          environment=docker
+    networks:
+      - pocket-pal
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: pocket-pal
+      POSTGRES_USER: postgres  
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - pocket-pal
+
+networks:
+  pocket-pal:
+    external: true  # Connect to observability network

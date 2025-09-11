@@ -159,8 +159,18 @@ func (c *openAIClient) ParseItems(ctx context.Context, rawText, languageCode str
 func (c *openAIClient) parseItemWithResponsesAPI(ctx context.Context, rawText, languageCode string) (*ParsedResult, error) {
 	prompt := c.buildPrompt(rawText, languageCode)
 
-	// Split prompt into instructions and input for better structure
-	instructions := "You are an AI assistant that standardizes shopping list items. Parse the given item and extract structured information. Respond ONLY with valid JSON."
+	// Load instructions from file
+	var instructions string
+	if c.promptBuilder != nil {
+		var err error
+		instructions, err = c.promptBuilder.LoadSingleItemInstructions()
+		if err != nil {
+			c.logger.Warn("Failed to load single item instructions from file, using fallback", "error", err)
+			instructions = "You are an AI assistant that standardizes shopping list items. Parse the given item and extract structured information. Respond ONLY with valid JSON."
+		}
+	} else {
+		instructions = "You are an AI assistant that standardizes shopping list items. Parse the given item and extract structured information. Respond ONLY with valid JSON."
+	}
 
 	reqBody := ResponsesRequest{
 		Model: c.config.Model,
@@ -367,16 +377,17 @@ func (c *openAIClient) parseAIResponse(content string) (*ParsedResult, error) {
 
 func (c *openAIClient) parseItemsWithResponsesAPI(ctx context.Context, rawText, languageCode string) ([]*ParsedResult, error) {
 	prompt := c.buildMultiItemPrompt(rawText, languageCode)
-
-	// Split prompt into instructions and input for better structure
-	instructions := "You are an AI assistant that intelligently separates and standardizes shopping list items. Parse the input text and extract multiple items if present. Respond ONLY with valid JSON array."
+	
+	if prompt == "" {
+		return nil, fmt.Errorf("failed to build multi-item prompt")
+	}
 
 	reqBody := ResponsesRequest{
 		Model: c.config.Model,
 		Input: []ResponsesMessage{
 			{
 				Role:    "user",
-				Content: fmt.Sprintf("%s\n\n%s\n\nInput: %s\nLanguage: %s", instructions, prompt, rawText, languageCode),
+				Content: prompt,
 			},
 		},
 		Reasoning: &ResponsesReasoning{
@@ -618,12 +629,19 @@ func (c *openAIClient) parseAIResponseAsArray(content string) ([]*ParsedResult, 
 
 // DetectLanguage detects the language of the given text using OpenAI
 func (c *openAIClient) DetectLanguage(ctx context.Context, text string) (string, error) {
-	// Use a simple prompt to detect language
-	prompt := fmt.Sprintf(`Detect the language of the following text and respond with ONLY the language code (ru, uk, or en):
-
-Text: "%s"
-
-Response format: just the 2-letter language code (ru for Russian, uk for Ukrainian, en for English)`, text)
+	// Build prompt using PromptBuilder
+	var prompt string
+	if c.promptBuilder != nil {
+		var err error
+		prompt, err = c.promptBuilder.BuildLanguageDetectionPrompt(text)
+		if err != nil {
+			c.logger.Error("Failed to build language detection prompt from file", "error", err)
+			return "", fmt.Errorf("language detection prompt file is required: %w", err)
+		}
+	} else {
+		c.logger.Error("PromptBuilder is not available for language detection")
+		return "", fmt.Errorf("prompt builder is required for language detection")
+	}
 
 	reqData := ResponsesRequest{
 		Model: "gpt-5-nano",
@@ -701,6 +719,124 @@ Response format: just the 2-letter language code (ru for Russian, uk for Ukraini
 		"model", reqData.Model)
 
 	return detectedLanguage, nil
+}
+
+// DetectProductList detects if the given text contains a product/shopping list
+func (c *openAIClient) DetectProductList(ctx context.Context, text string) (*ProductListDetectionResult, error) {
+	// Build prompt using PromptBuilder
+	var prompt string
+	if c.promptBuilder != nil {
+		var err error
+		prompt, err = c.promptBuilder.BuildProductListDetectionPrompt(text)
+		if err != nil {
+			c.logger.Error("Failed to build product list detection prompt from file", "error", err)
+			return nil, fmt.Errorf("product list detection prompt file is required: %w", err)
+		}
+	} else {
+		c.logger.Error("PromptBuilder is not available for product list detection")
+		return nil, fmt.Errorf("prompt builder is required for product list detection")
+	}
+
+	reqData := ResponsesRequest{
+		Model: "gpt-5-nano",
+		Input: []ResponsesMessage{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Store:     &[]bool{true}[0],
+		Reasoning: &ResponsesReasoning{Effort: "low"},
+	}
+
+	reqJSON, err := json.Marshal(reqData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal product list detection request: %w", err)
+	}
+
+	c.logger.Info("[PRODUCT-LIST] Sending product list detection request to OpenAI Responses API",
+		"url", c.config.BaseURL+"/responses",
+		"model", reqData.Model,
+		"text", text,
+		"request_body", string(reqJSON))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.config.BaseURL+"/responses", bytes.NewReader(reqJSON))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create product list detection request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("product list detection API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read product list detection response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("product list detection API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var apiResp ResponsesResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal product list detection response: %w", err)
+	}
+
+	if len(apiResp.Output) == 0 {
+		return nil, fmt.Errorf("no product list detection output returned")
+	}
+
+	// Find the assistant message in the output
+	var content string
+	for _, output := range apiResp.Output {
+		if output.Role == "assistant" && len(output.Content) > 0 {
+			content = output.Content[0].Text
+			break
+		}
+	}
+
+	if content == "" {
+		return nil, fmt.Errorf("no assistant response found in product list detection output")
+	}
+
+	// Parse the JSON response
+	content = strings.TrimSpace(content)
+	
+	// Find JSON in the response
+	start := strings.Index(content, "{")
+	end := strings.LastIndex(content, "}")
+
+	if start == -1 || end == -1 || start >= end {
+		return nil, fmt.Errorf("no valid JSON found in product list detection response: %s", content)
+	}
+
+	jsonStr := content[start : end+1]
+
+	var result ProductListDetectionResult
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal product list detection JSON: %w - content: %s", err, jsonStr)
+	}
+
+	// Validate the result
+	if result.Confidence < 0.0 || result.Confidence > 1.0 {
+		result.Confidence = 0.5 // Default confidence
+	}
+
+	c.logger.Info("Successfully detected product list with Responses API",
+		"text", text,
+		"is_product_list", result.IsProductList,
+		"confidence", result.Confidence,
+		"detected_items_count", result.DetectedItemsCount,
+		"sample_items", result.SampleItems,
+		"model", reqData.Model)
+
+	return &result, nil
 }
 
 // Helper function for min operation

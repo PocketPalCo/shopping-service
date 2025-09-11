@@ -59,6 +59,9 @@ type Config struct {
 	OpenAIUseResponsesAPI bool    `mapstructure:"SSV_OPENAI_USE_RESPONSES_API"`
 	OpenAIStore           bool    `mapstructure:"SSV_OPENAI_STORE"`
 	OpenAIReasoningEffort string  `mapstructure:"SSV_OPENAI_REASONING_EFFORT"`
+
+	// STT Service Configuration
+	STTServiceURL string `mapstructure:"SSV_STT_SERVICE_URL"`
 }
 
 // DefaultConfig generates a config with sane defaults.
@@ -107,6 +110,9 @@ func DefaultConfig() Config {
 		OpenAIUseResponsesAPI: true,
 		OpenAIStore:           true,
 		OpenAIReasoningEffort: "medium",
+
+		// STT service defaults
+		STTServiceURL: "http://localhost:8000",
 	}
 }
 

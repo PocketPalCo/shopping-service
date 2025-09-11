@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for Shopping Service
+  postgres-shopping:
+    image: postgres:15-alpine
+    container_name: shopping-service-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pocket-pal
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_shopping_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    networks:
+      - shopping-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pocket-pal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Redis Cache for Shopping Service  
+  redis-shopping:
+    image: redis:7-alpine
+    container_name: shopping-service-redis
+    restart: unless-stopped
+    command: redis-server --requirepass redis --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6380:6379"  # Different port to avoid conflicts
+    volumes:
+      - redis_shopping_data:/data
+    networks:
+      - shopping-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Shopping Service Application
+  shopping-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shopping-service-app
+    restart: unless-stopped
+    environment:
+      # Server Configuration
+      - SSV_ENVIRONMENT=production
+      - SSV_SERVER_BIND_ADDR=0.0.0.0:3009
+      - SSV_SERVER_READ_TIMEOUT=60
+      
+      # Logging
+      - SSV_LOG_FORMAT=json
+      - SSV_LOG_LEVEL=info
+      
+      # Database Configuration (connect to our postgres service)
+      - SSV_DB_HOST=postgres-shopping
+      - SSV_DB_PORT=5432
+      - SSV_DB_SSL=disable
+      - SSV_DB_USER=postgres
+      - SSV_DB_PASSWORD=postgres
+      - SSV_DB_DATABASE=pocket-pal
+      - SSV_DB_MAX_CONNECTIONS=50
+      
+      # Redis Configuration (connect to our redis service)
+      - SSV_REDIS_HOST=redis-shopping
+      - SSV_REDIS_PORT=6379
+      - SSV_REDIS_DB=0
+      - SSV_REDIS_USER=redis
+      - SSV_REDIS_PASS=redis
+      
+      # Telemetry (connect to host observability stack)
+      - SSV_OTLP_ENDPOINT=host.docker.internal:4317
+      - SSV_JAEGER_ENDPOINT=http://host.docker.internal:14268/api/traces
+      
+      # Swagger
+      - SSV_SWAGGER_HOST=localhost:3009
+    ports:
+      - "3009:3009"
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - shopping-network
+    depends_on:
+      postgres-shopping:
+        condition: service_healthy
+      redis-shopping:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_shopping_data:
+    driver: local
+  redis_shopping_data:
+    driver: local
+
+networks:
+  shopping-network:
+    driver: bridge
+    name: shopping-service-network

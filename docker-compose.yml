@@ -7,8 +7,41 @@ services:
       POSTGRES_PASSWORD: "postgres"
       POSTGRES_DB: "pocket-pal"
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres-datavolume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  shopping-service:
+    build: .
+    container_name: shopping-service-app
+    ports:
+      - "3009:3009"
+    environment:
+      - SSV_ENVIRONMENT=docker
+      - SSV_DB_HOST=postgres
+      - SSV_DB_PORT=5432
+      - SSV_DB_USER=postgres
+      - SSV_DB_PASSWORD=postgres
+      - SSV_DB_DATABASE=pocket-pal
+      - SSV_OTLP_ENDPOINT=host.docker.internal:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - default
+      - observability
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  observability:
+    external: true
+    name: observability_observability
+
 volumes:
   postgres-datavolume:

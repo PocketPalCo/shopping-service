@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- Index for fast telegram_id lookups
-CREATE INDEX idx_users_telegram_id ON users(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
 
 -- Index for authorized users
-CREATE INDEX idx_users_authorized ON users(is_authorized) WHERE is_authorized = true;
+CREATE INDEX IF NOT EXISTS idx_users_authorized ON users(is_authorized) WHERE is_authorized = true;

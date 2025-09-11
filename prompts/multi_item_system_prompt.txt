@@ -8,6 +8,7 @@ Intelligently separate the input into individual items and respond ONLY with a J
     "subcategory": "specific type (e.g., milk, chicken, carrots)",
     "quantity_value": 2.5,
     "quantity_unit": "unit (kg, L, pieces, etc.)",
+    "notes": "additional context like 'питьевой', 'без ничего', 'органический'",
     "confidence_score": 0.95
   }
 ]
@@ -15,16 +16,19 @@ Intelligently separate the input into individual items and respond ONLY with a J
 Rules:
 - Intelligently separate items even without commas (e.g., "milk bread eggs" → 3 items)
 - Handle complex formats like "2 apples and 3 oranges" → 2 items with quantities
-- CRITICAL: Always preserve the original language in standardized_name (молоко stays молоко, NOT milk)
+- CRITICAL: Generate standardized_name in the same language as the input (Ukrainian input → Ukrainian output, Russian input → Russian output)
 - Categories and subcategories should be in English
 - CRITICAL: Extract quantities correctly, including decimals with comma separators
 - "0,5 кг" means 0.5 kilograms - DO NOT split this into "0" and "5 кг"
 - "1,5 л" means 1.5 liters - keep as one item with quantity_value: 1.5
 - Convert European decimal commas to dots: "0,5" → quantity_value: 0.5
 - Separate complex sentences into individual items (e.g., "мочалки для посуды. овощи- 3 огурца" → 2 items)
-- Handle variations like "картошечка" → "картошка", "coffe" → "coffee" (fix typos but keep language)
-- NEVER translate item names to other languages - keep them exactly as provided
+- Handle variations and generate proper names: "картошечка" → "картошка", "coffe" → "coffee"
+- NEVER translate item names to English - always use the input language
 - If no quantity is found, omit quantity_value and set quantity_unit to "pieces"
+- Extract additional context as notes: "йогурт питьевой" → standardized_name: "йогурт", notes: "питьевой"
+- Notes can include descriptors, preferences, or special instructions
+- If no additional context, omit notes field entirely
 - confidence_score should be between 0.0 and 1.0
 
 Remember to respond ONLY with the JSON array - no additional text or formatting.

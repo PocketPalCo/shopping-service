@@ -7,6 +7,7 @@ import (
 
 	"github.com/PocketPalCo/shopping-service/config"
 	"github.com/PocketPalCo/shopping-service/internal/infra/postgres"
+	"github.com/PocketPalCo/shopping-service/pkg/telemetry"
 	"github.com/gofiber/contrib/otelfiber/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
@@ -23,10 +24,6 @@ import (
 	"log/slog"
 )
 
-var (
-	httpRequestsCounter  api.Int64Counter
-	httpRequestHistogram api.Float64Histogram
-)
 
 func initGlobalMiddlewares(app *fiber.App, cfg *config.Config) {
 	app.Use(
@@ -51,6 +48,40 @@ func initGlobalMiddlewares(app *fiber.App, cfg *config.Config) {
 	)
 
 	app.Use(otelfiber.Middleware())
+	
+	// Global HTTP metrics middleware
+	app.Use(func(c *fiber.Ctx) error {
+		// Skip metrics endpoint to avoid recursion
+		if c.Path() == "/metrics" {
+			return c.Next()
+		}
+		
+		start := time.Now()
+		err := c.Next()
+		durationMs := float64(time.Since(start).Milliseconds())
+
+		if telemetry.HTTPRequestsCounter != nil {
+			telemetry.HTTPRequestsCounter.Add(c.UserContext(), 1,
+				api.WithAttributes(
+					attribute.String("method", c.Method()),
+					attribute.String("path", c.Route().Path),
+					attribute.Int("status_code", c.Response().StatusCode()),
+				),
+			)
+		}
+
+		if telemetry.HTTPRequestHistogram != nil {
+			telemetry.HTTPRequestHistogram.Record(c.UserContext(), durationMs,
+				api.WithAttributes(
+					attribute.String("method", c.Method()),
+					attribute.String("path", c.Route().Path),
+					attribute.Int("status_code", c.Response().StatusCode()),
+				),
+			)
+		}
+
+		return err
+	})
 }
 
 func registerHttpRoutes(app *fiber.App, cfg *config.Config, db postgres.DB) {
@@ -89,7 +120,7 @@ func registerHttpRoutes(app *fiber.App, cfg *config.Config, db postgres.DB) {
 	}))
 
 	// Test endpoint for database connectivity
-	apiRoutes.Get("/test", withTransaction(db, func(c *fiber.Ctx, tx pgx.Tx) error {
+	apiRoutes.Get("/test", withMetrics(db, withTransaction(db, func(c *fiber.Ctx, tx pgx.Tx) error {
 		// Simple database connectivity test
 		var result int
 		err := tx.QueryRow(c.UserContext(), "SELECT 1").Scan(&result)
@@ -102,12 +133,12 @@ func registerHttpRoutes(app *fiber.App, cfg *config.Config, db postgres.DB) {
 			"message": "Database connectivity test passed",
 			"result":  result,
 		})
-	}))
+	})))
 
 	// Error test endpoint
-	apiRoutes.Get("/error", func(c *fiber.Ctx) error {
+	apiRoutes.Get("/error", withMetrics(db, func(c *fiber.Ctx) error {
 		return errors.New("test error endpoint")
-	})
+	}))
 }
 
 type withTransactionHandler func(c *fiber.Ctx, tx pgx.Tx) error
@@ -150,8 +181,8 @@ func withMetrics(db postgres.DB, handler fiber.Handler) fiber.Handler {
 
 		durationMs := float64(time.Since(start).Milliseconds())
 
-		if httpRequestsCounter != nil {
-			httpRequestsCounter.Add(c.UserContext(), 1,
+		if telemetry.HTTPRequestsCounter != nil {
+			telemetry.HTTPRequestsCounter.Add(c.UserContext(), 1,
 				api.WithAttributes(
 					attribute.String("method", c.Method()),
 					attribute.String("path", c.Route().Path),
@@ -160,8 +191,8 @@ func withMetrics(db postgres.DB, handler fiber.Handler) fiber.Handler {
 			)
 		}
 
-		if httpRequestHistogram != nil {
-			httpRequestHistogram.Record(c.UserContext(), durationMs,
+		if telemetry.HTTPRequestHistogram != nil {
+			telemetry.HTTPRequestHistogram.Record(c.UserContext(), durationMs,
 				api.WithAttributes(
 					attribute.String("method", c.Method()),
 					attribute.String("path", c.Route().Path),

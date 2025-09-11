@@ -1,0 +1,22 @@
+[Unit]
+Description=Shopping Service with PostgreSQL and Redis
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/washerd/projects/pocket-pal/shopping-service
+ExecStart=/usr/bin/docker compose -f docker-compose-production.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose-production.yml down
+ExecReload=/usr/bin/docker compose -f docker-compose-production.yml restart shopping-service
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

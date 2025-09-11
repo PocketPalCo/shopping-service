@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/PocketPalCo/shopping-service/config"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
@@ -14,8 +15,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-// NewObservableLogger creates a logger that exports logs to OTLP for Grafana
-func NewObservableLogger(cfg *config.Config) (*slog.Logger, *log.LoggerProvider, error) {
+// NewOTLPOnlyLogger creates a logger that exports logs only to OTLP (no local files)
+func NewOTLPOnlyLogger(cfg *config.Config) (*slog.Logger, *log.LoggerProvider, error) {
 	ctx := context.Background()
 
 	// Create OTLP log exporter
@@ -51,25 +52,29 @@ func NewObservableLogger(cfg *config.Config) (*slog.Logger, *log.LoggerProvider,
 		otelslog.WithLoggerProvider(loggerProvider),
 	)
 
-	// Create the standard logger for local output
-	localLogger := NewLogger(cfg)
-
-	// Create a multi-handler that sends logs both locally and to OTLP
-	multiHandler := &MultiHandler{
-		handlers: []slog.Handler{
-			localLogger.Handler(),
-			otlpHandler,
-		},
+	// Create combined handler with stdout for local debugging and OTLP for observability
+	var handler slog.Handler
+	if cfg.Environment == "production" {
+		// Production: OTLP only
+		handler = otlpHandler
+	} else {
+		// Development: stdout + OTLP
+		stdoutHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: cfg.GetSlogLevel(),
+		})
+		handler = &MultiHandler{
+			handlers: []slog.Handler{stdoutHandler, otlpHandler},
+		}
 	}
 
-	// Create the observable logger
-	observableLogger := slog.New(multiHandler).With(
+	// Create the logger
+	logger := slog.New(handler).With(
 		"service", "shopping-service",
 		"version", "1.0.0",
 		"environment", cfg.Environment,
 	)
 
-	return observableLogger, loggerProvider, nil
+	return logger, loggerProvider, nil
 }
 
 // MultiHandler sends logs to multiple handlers

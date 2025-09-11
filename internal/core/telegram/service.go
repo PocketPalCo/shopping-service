@@ -10,6 +10,7 @@ import (
 	"github.com/PocketPalCo/shopping-service/internal/core/families"
 	"github.com/PocketPalCo/shopping-service/internal/core/products"
 	"github.com/PocketPalCo/shopping-service/internal/core/shopping"
+	"github.com/PocketPalCo/shopping-service/internal/core/stt"
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -74,7 +75,11 @@ func NewTelegramService(cfg *config.Config, db *pgxpool.Pool, logger *slog.Logge
 	aiService := ai.NewService(db, aiClient, logger)
 
 	shoppingService := shopping.NewService(db, aiService)
-	botService, err := NewBotService(cfg.TelegramBotToken, usersService, familiesService, shoppingService, logger, cfg.TelegramDebug)
+
+	// Initialize STT client
+	sttClient := stt.NewClient(cfg.STTServiceURL)
+
+	botService, err := NewBotService(cfg.TelegramBotToken, usersService, familiesService, shoppingService, sttClient, logger, cfg.TelegramDebug)
 	if err != nil {
 		logger.Error("failed to initialize telegram bot", "error", err)
 		return nil, err

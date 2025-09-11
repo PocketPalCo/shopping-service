@@ -9,10 +9,10 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 );
 
 -- Index for fast session lookups
-CREATE INDEX idx_user_sessions_token ON user_sessions(session_token);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(session_token);
 
 -- Index for cleanup of expired sessions
-CREATE INDEX idx_user_sessions_expires ON user_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
 
 -- Index for user sessions
-CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);

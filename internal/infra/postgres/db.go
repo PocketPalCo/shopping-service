@@ -25,7 +25,9 @@ func Init(config *config.Config) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("unable to connect to database: %v", err)
 	}
 
-	conn.Config().MaxConns = int32(config.DbMaxConnections)
+	if config.DbMaxConnections > 0 && config.DbMaxConnections <= 2147483647 {
+		conn.Config().MaxConns = int32(config.DbMaxConnections)
+	}
 	conn.Config().MinConns = 5
 
 	return conn, nil

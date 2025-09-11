@@ -1,19 +1,55 @@
-FROM golang:1.24 as builder
+# Build stage
+FROM golang:1.24-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app
+
+# Copy go mod files first for better caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
 COPY . .
-COPY pkg/config/config.sample.yaml ./pkg/config/config.yaml
-RUN go mod download &&  go build -o ./shopping-service ./cmd
 
-# health check for grpc
-RUN GRPC_HEALTH_PROBE_VERSION=v0.4.4 && \
-    wget -qO/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 && \
-    chmod +x /grpc_health_probe
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags '-extldflags "-static"' -o shopping-service ./cmd
 
-FROM golang:1.24
-COPY --from=builder /app/shopping-service /app/shopping-service
-COPY --from=builder /app/pkg/config/config.yaml /app/pkg/config/config.yaml
-COPY --from=builder /grpc_health_probe /bin/grpc_health_probe
+# Install wget for health checks
+RUN apk add --no-cache wget
+
+# Runtime stage  
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk --no-cache add ca-certificates tzdata wget
+RUN mkdir /app
+
 WORKDIR /app
 
+# Copy binary from builder stage
+COPY --from=builder /app/shopping-service .
+
+# Create logs directory
+RUN mkdir -p logs
+
+# Create non-root user
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+# Change ownership
+RUN chown -R appuser:appgroup /app
+
+# Switch to non-root user
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3009/health || exit 1
+
+# Expose port
+EXPOSE 3009
+
+# Run the application
 ENTRYPOINT ["./shopping-service"]

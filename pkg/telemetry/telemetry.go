@@ -10,6 +10,36 @@ import (
 	"time"
 )
 
+// HTTP metrics available globally
+var (
+	HTTPRequestsCounter  api.Int64Counter
+	HTTPRequestHistogram api.Float64Histogram
+)
+
+// InitHTTPMetrics initializes HTTP metrics for the application
+func InitHTTPMetrics(provider *metric.MeterProvider) error {
+	meter := provider.Meter("http")
+
+	var err error
+
+	HTTPRequestsCounter, err = meter.Int64Counter("http.requests.total",
+		api.WithDescription("Total HTTP requests by method, path and status"))
+	if err != nil {
+		slog.Error("Error creating HTTP requests counter", slog.String("error", err.Error()))
+		return err
+	}
+
+	HTTPRequestHistogram, err = meter.Float64Histogram("http.request.duration.ms",
+		api.WithDescription("HTTP request duration in milliseconds"))
+	if err != nil {
+		slog.Error("Error creating HTTP request histogram", slog.String("error", err.Error()))
+		return err
+	}
+
+	slog.Info("HTTP metrics initialized successfully")
+	return nil
+}
+
 func InitTelemetry(provider *metric.MeterProvider, db *pgxpool.Pool) error {
 	err := runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second))
 	if err != nil {
