@@ -1,0 +1,8 @@
+{{if eq .MessageType "items_added"}}✅ Додано {{.ItemsCount}} товарів до '{{.ListName}}'!{{end}}
+{{if eq .MessageType "items_added_with_failures"}}✅ Додано {{.ItemsCount}} товарів до '{{.ListName}}'!
+⚠️ {{.FailedCount}} товарів не вдалося обробити.{{end}}
+{{if eq .MessageType "list_created"}}✅ Створено список '{{.ListName}}' та додано {{.ItemsCount}} товарів!{{end}}
+{{if eq .MessageType "list_created_with_failures"}}✅ Створено список '{{.ListName}}' та додано {{.ItemsCount}} товарів!
+⚠️ {{.FailedCount}} товарів не вдалося обробити.{{end}}
+{{if eq .MessageType "list_created_no_items"}}✅ Створено список '{{.ListName}}', але не вдалося додати товари.{{end}}
+{{if eq .MessageType "list_created_add_failed"}}✅ Створено список '{{.ListName}}', але не вдалося додати товари. Спробуйте додати їх вручну.{{end}}

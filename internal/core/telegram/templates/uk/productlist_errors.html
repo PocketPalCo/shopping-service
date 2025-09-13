@@ -1,0 +1,10 @@
+{{if eq .ErrorType "session_expired"}}❌ Сесія закінчилась. Спробуйте ще раз.{{end}}
+{{if eq .ErrorType "failed_to_process"}}❌ Не вдалося обробити запит.{{end}}
+{{if eq .ErrorType "failed_to_access_lists"}}❌ Не вдалося отримати доступ до ваших списків.{{end}}
+{{if eq .ErrorType "list_not_found"}}❌ Список не знайдено.{{end}}
+{{if eq .ErrorType "failed_to_add_items"}}❌ Не вдалося додати товари до списку. Спробуйте ще раз.{{end}}
+{{if eq .ErrorType "no_items_added"}}❌ Не вдалося додати жодного товару до списку.{{end}}
+{{if eq .ErrorType "no_family_available"}}❌ Не вдалося створити список: немає доступних сімей.{{end}}
+{{if eq .ErrorType "failed_to_create_list"}}❌ Не вдалося створити новий список покупок.{{end}}
+{{if eq .ErrorType "operation_cancelled"}}❌ Операція скасована.{{end}}
+{{if eq .ErrorType "empty_list_name"}}❌ Назва списку не може бути порожньою. Введіть правильну назву.{{end}}

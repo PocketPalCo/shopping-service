@@ -63,10 +63,10 @@ type ParsedResult struct {
 }
 
 type ProductListDetectionResult struct {
-	IsProductList       bool     `json:"is_product_list"`
-	Confidence          float64  `json:"confidence"`
-	DetectedItemsCount  int      `json:"detected_items_count"`
-	SampleItems         []string `json:"sample_items"`
+	IsProductList      bool     `json:"is_product_list"`
+	Confidence         float64  `json:"confidence"`
+	DetectedItemsCount int      `json:"detected_items_count"`
+	SampleItems        []string `json:"sample_items"`
 }
 
 type OpenAIClient interface {
@@ -355,6 +355,10 @@ func (s *Service) ParseAndStoreItems(ctx context.Context, rawText, languageCode 
 		"results_count", len(parsedResults))
 
 	for i, result := range parsedResults {
+		notesValue := "nil"
+		if result.Notes != nil {
+			notesValue = fmt.Sprintf("'%s'", *result.Notes)
+		}
 		s.logger.Info("AI parsed item",
 			"index", i+1,
 			"standardized_name", result.StandardizedName,
@@ -362,12 +366,63 @@ func (s *Service) ParseAndStoreItems(ctx context.Context, rawText, languageCode 
 			"subcategory", result.Subcategory,
 			"quantity_value", result.QuantityValue,
 			"quantity_unit", result.QuantityUnit,
+			"notes", notesValue,
 			"confidence_score", result.ConfidenceScore)
 	}
 
-	// Store training data for each parsed item - each gets its own original item record
+	// Apply confidence threshold filtering - items with confidence < 0.60 should be treated as notes
+	const confidenceThreshold = 0.60
+	var filteredResults []*ParsedResult
+	var lowConfidenceItems []string
+
+	for _, result := range parsedResults {
+		if result.ConfidenceScore >= confidenceThreshold {
+			filteredResults = append(filteredResults, result)
+		} else {
+			s.logger.Info("Low confidence item excluded as separate item",
+				"item", result.StandardizedName,
+				"confidence", result.ConfidenceScore,
+				"threshold", confidenceThreshold)
+			lowConfidenceItems = append(lowConfidenceItems, result.StandardizedName)
+		}
+	}
+
+	// If we have valid items and low confidence items, add low confidence items as notes to the first valid item
+	if len(filteredResults) > 0 && len(lowConfidenceItems) > 0 {
+		firstItem := filteredResults[0]
+
+		// Combine existing notes with low confidence items
+		var notes []string
+		if firstItem.Notes != nil && *firstItem.Notes != "" {
+			notes = append(notes, *firstItem.Notes)
+		}
+		notes = append(notes, lowConfidenceItems...)
+
+		combinedNotes := strings.Join(notes, ", ")
+		firstItem.Notes = &combinedNotes
+
+		s.logger.Info("Added low confidence items as notes to first item",
+			"main_item", firstItem.StandardizedName,
+			"notes", combinedNotes)
+	}
+
+	// If all items have low confidence, keep the highest confidence one
+	if len(filteredResults) == 0 && len(parsedResults) > 0 {
+		var highestConfidenceItem *ParsedResult
+		for _, result := range parsedResults {
+			if highestConfidenceItem == nil || result.ConfidenceScore > highestConfidenceItem.ConfidenceScore {
+				highestConfidenceItem = result
+			}
+		}
+		filteredResults = append(filteredResults, highestConfidenceItem)
+		s.logger.Info("All items had low confidence, keeping highest confidence item",
+			"item", highestConfidenceItem.StandardizedName,
+			"confidence", highestConfidenceItem.ConfidenceScore)
+	}
+
+	// Store training data for each filtered item - each gets its own original item record
 	var results []*ParsedResult
-	for i, parsedResult := range parsedResults {
+	for i, parsedResult := range filteredResults {
 		// Store individual original item for this specific parsed result
 		// Use the standardized name as the original text to keep it within varchar(255) limits
 		originalItemText := parsedResult.StandardizedName
@@ -397,7 +452,7 @@ func (s *Service) ParseAndStoreItems(ctx context.Context, rawText, languageCode 
 			"category", parsedResult.Category,
 			"confidence", parsedResult.ConfidenceScore,
 			"item_index", i+1,
-			"total_items", len(parsedResults))
+			"total_items", len(filteredResults))
 
 		// Attach the IDs to the parsed result so they can be used by the shopping service
 		parsedResult.OriginalItemID = &originalItem.ID
@@ -409,7 +464,8 @@ func (s *Service) ParseAndStoreItems(ctx context.Context, rawText, languageCode 
 	s.logger.Info("Successfully parsed and stored items with AI",
 		"raw_input", rawText,
 		"language", languageCode,
-		"total_parsed", len(parsedResults),
+		"total_ai_parsed", len(parsedResults),
+		"filtered_results", len(filteredResults),
 		"successfully_stored", len(results))
 
 	return results, nil

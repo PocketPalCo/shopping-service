@@ -376,6 +376,96 @@ func (s *Service) GetAllUsers(ctx context.Context) ([]*User, error) {
 	return users, nil
 }
 
+// GetTotalUsersCount returns the total number of users
+func (s *Service) GetTotalUsersCount(ctx context.Context) (int, error) {
+	ctx, span := tracer.Start(ctx, "users.GetTotalUsersCount")
+	defer span.End()
+
+	query := `SELECT COUNT(*) FROM users`
+
+	var count int
+	err := s.db.QueryRow(ctx, query).Scan(&count)
+	if err != nil {
+		span.RecordError(err)
+		return 0, fmt.Errorf("failed to get total users count: %w", err)
+	}
+
+	return count, nil
+}
+
+// GetAuthorizedUsersCount returns the number of authorized users
+func (s *Service) GetAuthorizedUsersCount(ctx context.Context) (int, error) {
+	ctx, span := tracer.Start(ctx, "users.GetAuthorizedUsersCount")
+	defer span.End()
+
+	query := `SELECT COUNT(*) FROM users WHERE is_authorized = true`
+
+	var count int
+	err := s.db.QueryRow(ctx, query).Scan(&count)
+	if err != nil {
+		span.RecordError(err)
+		return 0, fmt.Errorf("failed to get authorized users count: %w", err)
+	}
+
+	return count, nil
+}
+
+// UpdateUserLocale updates a user's locale preference
+func (s *Service) UpdateUserLocale(ctx context.Context, telegramID int64, locale string) error {
+	ctx, span := tracer.Start(ctx, "users.UpdateUserLocale")
+	defer span.End()
+
+	// Normalize the locale
+	normalizedLocale := normalizeLocale(locale)
+
+	query := `
+		UPDATE users 
+		SET locale = $1, updated_at = NOW()
+		WHERE telegram_id = $2
+	`
+
+	result, err := s.db.Exec(ctx, query, normalizedLocale, telegramID)
+	if err != nil {
+		span.RecordError(err)
+		// Record error metric
+		if telemetry.UserOperationsTotal != nil {
+			telemetry.UserOperationsTotal.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "update_locale"),
+					attribute.String("status", "error"),
+				),
+			)
+		}
+		return fmt.Errorf("failed to update user locale %d: %w", telegramID, err)
+	}
+
+	if result.RowsAffected() == 0 {
+		// Record not found metric
+		if telemetry.UserOperationsTotal != nil {
+			telemetry.UserOperationsTotal.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "update_locale"),
+					attribute.String("status", "not_found"),
+				),
+			)
+		}
+		return fmt.Errorf("user with telegram_id %d not found", telegramID)
+	}
+
+	// Record success metric
+	if telemetry.UserOperationsTotal != nil {
+		telemetry.UserOperationsTotal.Add(ctx, 1,
+			api.WithAttributes(
+				attribute.String("operation", "update_locale"),
+				attribute.String("status", "success"),
+				attribute.String("locale", normalizedLocale),
+			),
+		)
+	}
+
+	return nil
+}
+
 // normalizeLocale converts language codes to supported locales
 func normalizeLocale(languageCode string) string {
 	switch languageCode {

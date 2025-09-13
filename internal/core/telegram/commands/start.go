@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // StartCommand handles the /start command
@@ -42,7 +43,7 @@ func (c *StartCommand) RequiresAdmin() bool {
 // Handle executes the start command
 func (c *StartCommand) Handle(ctx context.Context, chatID int64, user *users.User, args []string) error {
 	data := StartTemplateData{
-		FirstName:    getUserDisplayName(user),
+		FirstName:    GetUserDisplayName(user),
 		IsAuthorized: user.IsAuthorized,
 	}
 
@@ -53,6 +54,60 @@ func (c *StartCommand) Handle(ctx context.Context, chatID int64, user *users.Use
 		return err
 	}
 
-	c.SendHTMLMessage(chatID, message)
+	// Create main menu with buttons instead of requiring commands
+	keyboard := c.createMainMenu(user)
+	c.SendMessageWithKeyboard(chatID, message, keyboard)
 	return nil
+}
+
+// createMainMenu creates the main menu inline keyboard based on user authorization
+func (c *StartCommand) createMainMenu(user *users.User) tgbotapi.InlineKeyboardMarkup {
+	var buttons [][]tgbotapi.InlineKeyboardButton
+
+	if user.IsAuthorized {
+		// Authorized user menu - using localized button templates
+		buttons = [][]tgbotapi.InlineKeyboardButton{
+			{
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_lists", user.Locale), "menu_lists"),
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_families", user.Locale), "menu_families"),
+			},
+			{
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_createlist", user.Locale), "menu_createlist"),
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_createfamily", user.Locale), "menu_createfamily"),
+			},
+			{
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_help", user.Locale), "menu_help"),
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_status", user.Locale), "menu_status"),
+			},
+		}
+
+		// Add admin menu if user is admin
+		if c.usersService.IsAdmin(user.TelegramID) {
+			adminButtons := []tgbotapi.InlineKeyboardButton{
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_users", user.Locale), "menu_users"),
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_stats", user.Locale), "menu_stats"),
+			}
+			buttons = append(buttons, adminButtons)
+		}
+	} else {
+		// Non-authorized user menu (limited options) - using localized button templates
+		buttons = [][]tgbotapi.InlineKeyboardButton{
+			{
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_help", user.Locale), "menu_help"),
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_status", user.Locale), "menu_status"),
+			},
+			{
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_myid", user.Locale), "menu_myid"),
+			},
+		}
+	}
+
+	return tgbotapi.NewInlineKeyboardMarkup(buttons...)
+}
+
+// CreateMainMenuButton creates a localized "Main Menu" button that can be added to other command responses
+func CreateMainMenuButton(templateManager TemplateRenderer, locale string) []tgbotapi.InlineKeyboardButton {
+	return []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData(templateManager.RenderButton("button_main_menu", locale), "menu_start"),
+	}
 }

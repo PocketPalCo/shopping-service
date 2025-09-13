@@ -50,7 +50,9 @@ func (c *CreateListCommand) Handle(ctx context.Context, chatID int64, user *user
 			c.logger.Error("Failed to render no families template", "error", err)
 			message = "❌ You need to be part of a family to create shopping lists.\n\nUse /createfamily to create a family first."
 		}
-		c.SendHTMLMessage(chatID, message)
+		// Create keyboard with Main Menu button
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(CreateMainMenuButton(c.templateManager, user.Locale))
+		c.SendMessageWithKeyboard(chatID, message, keyboard)
 		return nil
 	}
 
@@ -63,6 +65,9 @@ func (c *CreateListCommand) Handle(ctx context.Context, chatID int64, user *user
 		)
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{button})
 	}
+
+	// Add Main Menu button
+	buttons = append(buttons, CreateMainMenuButton(c.templateManager, user.Locale))
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
 

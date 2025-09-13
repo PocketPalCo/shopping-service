@@ -1,0 +1,8 @@
+{{if eq .MessageType "items_added"}}✅ Added {{.ItemsCount}} items to '{{.ListName}}'!{{end}}
+{{if eq .MessageType "items_added_with_failures"}}✅ Added {{.ItemsCount}} items to '{{.ListName}}'!
+⚠️ {{.FailedCount}} items failed to process.{{end}}
+{{if eq .MessageType "list_created"}}✅ Created list '{{.ListName}}' and added {{.ItemsCount}} items!{{end}}
+{{if eq .MessageType "list_created_with_failures"}}✅ Created list '{{.ListName}}' and added {{.ItemsCount}} items!
+⚠️ {{.FailedCount}} items failed to process.{{end}}
+{{if eq .MessageType "list_created_no_items"}}✅ Created list '{{.ListName}}' but no items could be added.{{end}}
+{{if eq .MessageType "list_created_add_failed"}}✅ Created list '{{.ListName}}' but failed to add items. Please try adding them manually.{{end}}

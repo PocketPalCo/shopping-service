@@ -6,8 +6,8 @@ import (
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
 )
 
-// getUserDisplayName extracts display name from user (shared utility function)
-func getUserDisplayName(user *users.User) string {
+// GetUserDisplayName extracts display name from user (shared utility function)
+func GetUserDisplayName(user *users.User) string {
 	if user.FirstName != "" {
 		if user.LastName != nil && *user.LastName != "" {
 			return user.FirstName + " " + *user.LastName

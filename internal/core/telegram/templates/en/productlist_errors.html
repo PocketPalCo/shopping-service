@@ -1,0 +1,10 @@
+{{if eq .ErrorType "session_expired"}}❌ Session expired. Please try again.{{end}}
+{{if eq .ErrorType "failed_to_process"}}❌ Failed to process request.{{end}}
+{{if eq .ErrorType "failed_to_access_lists"}}❌ Failed to access your lists.{{end}}
+{{if eq .ErrorType "list_not_found"}}❌ List not found.{{end}}
+{{if eq .ErrorType "failed_to_add_items"}}❌ Failed to add items to the list. Please try again.{{end}}
+{{if eq .ErrorType "no_items_added"}}❌ No items could be added to the list.{{end}}
+{{if eq .ErrorType "no_family_available"}}❌ Failed to create list: no family available.{{end}}
+{{if eq .ErrorType "failed_to_create_list"}}❌ Failed to create new shopping list.{{end}}
+{{if eq .ErrorType "operation_cancelled"}}❌ Operation cancelled.{{end}}
+{{if eq .ErrorType "empty_list_name"}}❌ List name cannot be empty. Please enter a valid name.{{end}}

@@ -295,7 +295,7 @@ func (h *DuplicateCallbackHandler) handleItemAction(ctx context.Context, callbac
 
 func (h *DuplicateCallbackHandler) showUpdatedList(ctx context.Context, chatID int64, listID uuid.UUID, user *users.User) {
 	// Create a ListCallbackHandler to reuse the existing list building logic
-	listHandler := NewListCallbackHandler(h.BaseHandler)
+	listHandler := NewListCallbackHandler(h.BaseHandler, h.stateManager)
 	message, keyboard, err := listHandler.BuildListViewMessage(ctx, listID, user)
 	if err != nil {
 		h.logger.Error("Failed to build list view for updated view", "error", err, "list_id", listID)

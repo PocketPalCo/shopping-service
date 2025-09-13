@@ -58,7 +58,7 @@ func (c *AuthorizeCommand) Handle(ctx context.Context, chatID int64, user *users
 
 	// Check if user is already authorized
 	if targetUser.IsAuthorized {
-		displayName := getUserDisplayName(targetUser)
+		displayName := GetUserDisplayName(targetUser)
 		c.SendMessage(chatID, "✅ User "+displayName+" is already authorized.")
 		return nil
 	}
@@ -71,8 +71,8 @@ func (c *AuthorizeCommand) Handle(ctx context.Context, chatID int64, user *users
 		return err
 	}
 
-	displayName := getUserDisplayName(targetUser)
-	adminName := getUserDisplayName(user)
+	displayName := GetUserDisplayName(targetUser)
+	adminName := GetUserDisplayName(user)
 
 	// Send confirmation to admin
 	c.SendMessage(chatID, "✅ User "+displayName+" has been authorized!")

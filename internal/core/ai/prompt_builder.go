@@ -23,10 +23,10 @@ func NewPromptBuilder(promptsDir string) *PromptBuilder {
 }
 
 func (pb *PromptBuilder) BuildPrompt(rawText, languageCode string) (string, error) {
-	// Load single-item system prompt
-	systemPrompt, err := pb.loadPromptFile("single_item_system_prompt.txt")
+	// Load unified system prompt
+	systemPrompt, err := pb.loadPromptFile("unified_system_prompt.txt")
 	if err != nil {
-		return "", fmt.Errorf("failed to load single-item system prompt: %w", err)
+		return "", fmt.Errorf("failed to load unified system prompt: %w", err)
 	}
 
 	// Load categories context
@@ -81,10 +81,10 @@ func (pb *PromptBuilder) BuildMultiItemPromptWithProducts(rawText, languageCode 
 	// Build the products context for the AI
 	productsContext := pb.buildProductsContext(productsList, languageCode)
 
-	// Load multi-item system prompt and add products context to it
-	systemPrompt, err := pb.loadPromptFile("multi_item_system_prompt.txt")
+	// Load unified system prompt and add products context to it
+	systemPrompt, err := pb.loadPromptFile("unified_system_prompt.txt")
 	if err != nil {
-		return "", fmt.Errorf("failed to load multi-item system prompt: %w", err)
+		return "", fmt.Errorf("failed to load unified system prompt: %w", err)
 	}
 
 	// Enhance system prompt with products context
@@ -139,10 +139,10 @@ func (pb *PromptBuilder) BuildMultiItemPromptWithProducts(rawText, languageCode 
 }
 
 func (pb *PromptBuilder) BuildMultiItemPrompt(rawText, languageCode string) (string, error) {
-	// Load multi-item system prompt
-	systemPrompt, err := pb.loadPromptFile("multi_item_system_prompt.txt")
+	// Load unified system prompt
+	systemPrompt, err := pb.loadPromptFile("unified_system_prompt.txt")
 	if err != nil {
-		return "", fmt.Errorf("failed to load multi-item system prompt: %w", err)
+		return "", fmt.Errorf("failed to load unified system prompt: %w", err)
 	}
 
 	// Load categories context
@@ -198,24 +198,24 @@ func (pb *PromptBuilder) loadPromptFile(filename string) (string, error) {
 	if strings.Contains(filename, "..") || strings.Contains(filename, "/") || strings.Contains(filename, "\\") {
 		return "", fmt.Errorf("invalid filename: %s", filename)
 	}
-	
+
 	filePath := filepath.Join(pb.promptsDir, filename)
-	
+
 	// Ensure the resolved path is still within the prompts directory
 	absPromptsDir, err := filepath.Abs(pb.promptsDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve prompts directory: %w", err)
 	}
-	
+
 	absFilePath, err := filepath.Abs(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve file path: %w", err)
 	}
-	
+
 	if !strings.HasPrefix(absFilePath, absPromptsDir) {
 		return "", fmt.Errorf("file path outside prompts directory: %s", filename)
 	}
-	
+
 	content, err := os.ReadFile(filePath) // #nosec G304 - path validated for traversal attacks
 	if err != nil {
 		return "", fmt.Errorf("failed to read prompt file %s: %w", filename, err)
@@ -244,8 +244,7 @@ func (pb *PromptBuilder) GetAvailableLanguages() ([]string, error) {
 // ValidatePromptFiles checks that all required prompt files exist
 func (pb *PromptBuilder) ValidatePromptFiles() error {
 	requiredFiles := []string{
-		"single_item_system_prompt.txt",
-		"multi_item_system_prompt.txt",
+		"unified_system_prompt.txt",
 		"single_item_task_template.txt",
 		"multi_item_task_template.txt",
 		"categories_context.txt",
@@ -276,7 +275,7 @@ func (pb *PromptBuilder) BuildLanguageDetectionPrompt(text string) (string, erro
 
 	// Replace placeholder with actual text
 	prompt := strings.Replace(promptTemplate, "{text}", text, -1)
-	
+
 	return prompt, nil
 }
 
@@ -300,7 +299,7 @@ func (pb *PromptBuilder) BuildProductListDetectionPrompt(text string) (string, e
 
 	// Replace placeholder with actual text
 	prompt := strings.Replace(promptTemplate, "{text}", text, -1)
-	
+
 	return prompt, nil
 }
 

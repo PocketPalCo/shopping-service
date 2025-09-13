@@ -1,0 +1,10 @@
+{{if eq .ErrorType "session_expired"}}❌ Сессия истекла. Попробуйте ещё раз.{{end}}
+{{if eq .ErrorType "failed_to_process"}}❌ Не удалось обработать запрос.{{end}}
+{{if eq .ErrorType "failed_to_access_lists"}}❌ Не удалось получить доступ к вашим спискам.{{end}}
+{{if eq .ErrorType "list_not_found"}}❌ Список не найден.{{end}}
+{{if eq .ErrorType "failed_to_add_items"}}❌ Не удалось добавить товары в список. Попробуйте ещё раз.{{end}}
+{{if eq .ErrorType "no_items_added"}}❌ Не удалось добавить ни одного товара в список.{{end}}
+{{if eq .ErrorType "no_family_available"}}❌ Не удалось создать список: нет доступных семей.{{end}}
+{{if eq .ErrorType "failed_to_create_list"}}❌ Не удалось создать новый список покупок.{{end}}
+{{if eq .ErrorType "operation_cancelled"}}❌ Операция отменена.{{end}}
+{{if eq .ErrorType "empty_list_name"}}❌ Название списка не может быть пустым. Введите правильное название.{{end}}

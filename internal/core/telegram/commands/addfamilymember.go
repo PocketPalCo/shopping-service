@@ -192,7 +192,7 @@ func (c *AddFamilyMemberCommand) Handle(ctx context.Context, chatID int64, user 
 				UserName   string
 				FamilyName string
 			}{
-				UserName:   getUserDisplayName(targetUser),
+				UserName:   GetUserDisplayName(targetUser),
 				FamilyName: familyName,
 			}
 			message, err2 := c.templateManager.RenderTemplate("user_already_member", user.Locale, data)
@@ -221,7 +221,7 @@ func (c *AddFamilyMemberCommand) Handle(ctx context.Context, chatID int64, user 
 		UserName   string
 		FamilyName string
 	}{
-		UserName:   getUserDisplayName(targetUser),
+		UserName:   GetUserDisplayName(targetUser),
 		FamilyName: familyName,
 	}
 
@@ -239,7 +239,7 @@ func (c *AddFamilyMemberCommand) Handle(ctx context.Context, chatID int64, user 
 		AdminName  string
 	}{
 		FamilyName: familyName,
-		AdminName:  getUserDisplayName(user),
+		AdminName:  GetUserDisplayName(user),
 	}
 
 	notificationMsg, err := c.templateManager.RenderTemplate("family_member_notification", targetUser.Locale, memberData)

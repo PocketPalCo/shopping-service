@@ -15,12 +15,14 @@ import (
 // ListCallbackHandler handles shopping list related callbacks
 type ListCallbackHandler struct {
 	BaseHandler
+	stateManager *StateManager
 }
 
 // NewListCallbackHandler creates a new list callback handler
-func NewListCallbackHandler(base BaseHandler) *ListCallbackHandler {
+func NewListCallbackHandler(base BaseHandler, stateManager *StateManager) *ListCallbackHandler {
 	return &ListCallbackHandler{
-		BaseHandler: base,
+		BaseHandler:  base,
+		stateManager: stateManager,
 	}
 }
 
@@ -148,6 +150,7 @@ func (h *ListCallbackHandler) BuildListViewMessage(ctx context.Context, listID u
 	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("refresh", user.Locale), fmt.Sprintf("list_view_%s", listID.String())),
 		tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("all_lists", user.Locale), "show_all_lists"),
+		tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("home", user.Locale), "menu_start"),
 	})
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
@@ -233,8 +236,9 @@ func (h *ListCallbackHandler) HandleAddItem(ctx context.Context, callback *tgbot
 		return
 	}
 
-	// Store state that user is adding item to this list - this would need to be implemented
-	// For now, we'll leave this as a TODO since the state management is in the bot service
+	// Store state that user is adding item to this list and the message ID for later replacement
+	h.stateManager.SetUserState(user.TelegramID, "adding_item_to_list", listID.String())
+	h.stateManager.SetUserState(user.TelegramID, "add_item_message_id", fmt.Sprintf("%d:%d", callback.Message.Chat.ID, callback.Message.MessageID))
 	h.logger.Info("User entered add item state", "user_id", user.TelegramID, "list_id", listID)
 }
 
@@ -310,6 +314,11 @@ func (h *ListCallbackHandler) HandleListCallback(ctx context.Context, callback *
 	switch action {
 	case "view":
 		h.HandleViewList(ctx, callback, listID, user)
+		// Set viewing state with list ID and message ID for later replacement
+		if stateManager != nil {
+			viewStateData := fmt.Sprintf("%s:%d:%d", listID.String(), callback.Message.Chat.ID, callback.Message.MessageID)
+			stateManager.SetUserState(user.TelegramID, "viewing_list", viewStateData)
+		}
 	case "additem":
 		h.HandleAddItem(ctx, callback, listID, user)
 		if stateManager != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // FamiliesCommand handles the /families command
@@ -77,6 +78,9 @@ func (c *FamiliesCommand) Handle(ctx context.Context, chatID int64, user *users.
 		return err
 	}
 
-	c.SendHTMLMessage(chatID, message)
+	// Create keyboard with Main Menu button
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(CreateMainMenuButton(c.templateManager, user.Locale))
+
+	c.SendMessageWithKeyboard(chatID, message, keyboard)
 	return nil
 }

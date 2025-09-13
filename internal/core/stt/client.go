@@ -33,11 +33,12 @@ type STTRequest struct {
 }
 
 type STTResponse struct {
-	SessionID       string  `json:"session_id"`
-	ChunkID         int     `json:"chunk_id"`
-	RawText         string  `json:"raw_text"`
-	Translation     string  `json:"translation"`
-	ProcessingTimeS float64 `json:"processing_time_s"`
+	SessionID        string  `json:"session_id"`
+	ChunkID          int     `json:"chunk_id"`
+	RawText          string  `json:"raw_text"`
+	Translation      string  `json:"translation"`
+	ProcessingTimeS  float64 `json:"processing_time_s"`
+	DetectedLanguage string  `json:"detected_language"`
 }
 
 func NewClient(baseURL string) *Client {

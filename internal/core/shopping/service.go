@@ -35,7 +35,7 @@ type ShoppingItem struct {
 	ListID         uuid.UUID  `json:"list_id" db:"list_id"`
 	Name           string     `json:"name" db:"name"`
 	Quantity       *string    `json:"quantity" db:"quantity"`
-	Notes          *string    `json:"notes" db:"notes"`               // Additional notes like "питьевой", "без ничего" 
+	Notes          *string    `json:"notes" db:"notes"` // Additional notes like "питьевой", "без ничего"
 	IsCompleted    bool       `json:"is_completed" db:"is_completed"`
 	AddedBy        uuid.UUID  `json:"added_by" db:"added_by"`
 	CompletedBy    *uuid.UUID `json:"completed_by" db:"completed_by"`
@@ -121,7 +121,7 @@ func (s *Service) CreateShoppingList(ctx context.Context, req CreateShoppingList
 		span.RecordError(err)
 		// Record error metric
 		if telemetry.ShoppingListOperations != nil {
-			telemetry.ShoppingListOperations.Add(ctx, 1, 
+			telemetry.ShoppingListOperations.Add(ctx, 1,
 				api.WithAttributes(
 					attribute.String("operation", "create"),
 					attribute.String("status", "error"),
@@ -132,13 +132,13 @@ func (s *Service) CreateShoppingList(ctx context.Context, req CreateShoppingList
 
 	// Record success metric
 	if telemetry.ShoppingListOperations != nil {
-		telemetry.ShoppingListOperations.Add(ctx, 1, 
+		telemetry.ShoppingListOperations.Add(ctx, 1,
 			api.WithAttributes(
 				attribute.String("operation", "create"),
 				attribute.String("status", "success"),
 			))
 	}
-	
+
 	// Update active lists counter
 	if telemetry.ShoppingListsActive != nil {
 		telemetry.ShoppingListsActive.Add(ctx, 1)
@@ -155,8 +155,7 @@ func (s *Service) GetUserShoppingLists(ctx context.Context, userID uuid.UUID) ([
 		SELECT DISTINCT sl.id, sl.name, sl.description, sl.owner_id, sl.family_id, sl.is_shared, sl.created_at, sl.updated_at
 		FROM shopping_lists sl
 		LEFT JOIN family_members fm ON sl.family_id = fm.family_id
-		WHERE sl.owner_id = $1 
-		   OR sl.is_shared = true 
+		WHERE (sl.owner_id = $1)
 		   OR (sl.family_id IS NOT NULL AND fm.user_id = $1)
 		ORDER BY sl.created_at DESC
 	`
@@ -224,13 +223,12 @@ func (s *Service) GetUserShoppingListsWithFamilies(ctx context.Context, userID u
 
 	// Get shopping lists with family names
 	query := `
-		SELECT DISTINCT sl.id, sl.name, sl.description, sl.owner_id, sl.family_id, sl.is_shared, 
+		SELECT DISTINCT sl.id, sl.name, sl.description, sl.owner_id, sl.family_id, sl.is_shared,
 		       sl.created_at, sl.updated_at, f.name as family_name
 		FROM shopping_lists sl
 		LEFT JOIN family_members fm ON sl.family_id = fm.family_id
 		LEFT JOIN families f ON sl.family_id = f.id
-		WHERE sl.owner_id = $1 
-		   OR sl.is_shared = true 
+		WHERE (sl.owner_id = $1)
 		   OR (sl.family_id IS NOT NULL AND fm.user_id = $1)
 		ORDER BY sl.created_at DESC
 	`
@@ -376,7 +374,7 @@ func (s *Service) AddItemToListWithLanguage(ctx context.Context, listID uuid.UUI
 		span.RecordError(err)
 		// Record error metric
 		if telemetry.ShoppingItemOperations != nil {
-			telemetry.ShoppingItemOperations.Add(ctx, 1, 
+			telemetry.ShoppingItemOperations.Add(ctx, 1,
 				api.WithAttributes(
 					attribute.String("operation", "add"),
 					attribute.String("status", "error"),
@@ -387,7 +385,7 @@ func (s *Service) AddItemToListWithLanguage(ctx context.Context, listID uuid.UUI
 
 	// Record success metric
 	if telemetry.ShoppingItemOperations != nil {
-		telemetry.ShoppingItemOperations.Add(ctx, 1, 
+		telemetry.ShoppingItemOperations.Add(ctx, 1,
 			api.WithAttributes(
 				attribute.String("operation", "add"),
 				attribute.String("status", "success"),
@@ -926,6 +924,16 @@ func (s *Service) AddParsedItemsToList(ctx context.Context, listID uuid.UUID, pa
 			quantityParam = &quantityStr
 		}
 
+		// Debug logging for notes field
+		notesValue := "nil"
+		if parsedResult.Notes != nil {
+			notesValue = fmt.Sprintf("'%s'", *parsedResult.Notes)
+		}
+		s.logger.Info("DEBUG: Inserting item with notes",
+			"item_name", itemName,
+			"notes", notesValue,
+			"quantity", quantityParam)
+
 		err := s.db.QueryRow(ctx, query, listID, itemName, quantityParam, parsedResult.Notes, addedBy,
 			parsedResult.OriginalItemID, parsedResult.ParsedItemID, displayName, parsedName).Scan(
 			&item.ID, &item.ListID, &item.Name, &item.Quantity, &item.Notes, &item.IsCompleted,
@@ -933,6 +941,16 @@ func (s *Service) AddParsedItemsToList(ctx context.Context, listID uuid.UUID, pa
 			&item.OriginalItemID, &item.ParsedItemID, &item.DisplayName, &item.ParsedName, &item.ParsingStatus,
 			&item.CreatedAt, &item.UpdatedAt,
 		)
+
+		// Debug logging for what came back from database
+		dbNotesValue := "nil"
+		if item.Notes != nil {
+			dbNotesValue = fmt.Sprintf("'%s'", *item.Notes)
+		}
+		s.logger.Info("DEBUG: Item returned from database",
+			"item_name", item.Name,
+			"notes", dbNotesValue,
+			"item_id", item.ID)
 
 		if err != nil {
 			s.logger.Error("Failed to insert parsed shopping item", "error", err, "item", itemName)
@@ -995,10 +1013,10 @@ func (s *Service) AddItemsToListWithAI(ctx context.Context, listID uuid.UUID, ra
 
 			// Create shopping item with AI parsing data
 			query := `
-				INSERT INTO shopping_items (list_id, name, quantity, is_completed, added_by, 
+				INSERT INTO shopping_items (list_id, name, quantity, notes, is_completed, added_by,
 				                           original_item_id, parsed_item_id, display_name, parsed_name, parsing_status, created_at, updated_at)
-				VALUES ($1, $2, $3, false, $4, $5, $6, $7, $8, 'parsed', NOW(), NOW())
-				RETURNING id, list_id, name, quantity, is_completed, added_by, completed_by, completed_at,
+				VALUES ($1, $2, $3, $4, false, $5, $6, $7, $8, $9, 'parsed', NOW(), NOW())
+				RETURNING id, list_id, name, quantity, notes, is_completed, added_by, completed_by, completed_at,
 				         original_item_id, parsed_item_id, display_name, parsed_name, parsing_status,
 				         created_at, updated_at
 			`
@@ -1012,9 +1030,9 @@ func (s *Service) AddItemsToListWithAI(ctx context.Context, listID uuid.UUID, ra
 				quantityParam = &quantityStr
 			}
 
-			err := s.db.QueryRow(ctx, query, listID, itemName, quantityParam, addedBy,
+			err := s.db.QueryRow(ctx, query, listID, itemName, quantityParam, parsedResult.Notes, addedBy,
 				parsedResult.OriginalItemID, parsedResult.ParsedItemID, displayName, parsedName).Scan(
-				&item.ID, &item.ListID, &item.Name, &item.Quantity, &item.IsCompleted,
+				&item.ID, &item.ListID, &item.Name, &item.Quantity, &item.Notes, &item.IsCompleted,
 				&item.AddedBy, &item.CompletedBy, &item.CompletedAt,
 				&item.OriginalItemID, &item.ParsedItemID, &item.DisplayName, &item.ParsedName, &item.ParsingStatus,
 				&item.CreatedAt, &item.UpdatedAt,
@@ -1142,4 +1160,21 @@ func (s *Service) DetectLanguage(ctx context.Context, text string) (string, erro
 	defer span.End()
 
 	return s.aiService.DetectLanguage(ctx, text)
+}
+
+// GetTotalShoppingListsCount returns the total number of shopping lists
+func (s *Service) GetTotalShoppingListsCount(ctx context.Context) (int, error) {
+	ctx, span := tracer.Start(ctx, "shopping.GetTotalShoppingListsCount")
+	defer span.End()
+
+	query := `SELECT COUNT(*) FROM shopping_lists`
+
+	var count int
+	err := s.db.QueryRow(ctx, query).Scan(&count)
+	if err != nil {
+		span.RecordError(err)
+		return 0, fmt.Errorf("failed to get total shopping lists count: %w", err)
+	}
+
+	return count, nil
 }

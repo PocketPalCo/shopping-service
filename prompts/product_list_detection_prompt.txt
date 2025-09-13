@@ -1,11 +1,13 @@
-Analyze the following text and determine if it contains a shopping/product list. 
+Analyze the following text and determine if it contains shopping/product items that a user wants to add to a shopping list.
 
 Consider these criteria:
-- Contains multiple items (food, household goods, etc.)
-- Items might be separated by commas, newlines, or dashes
+- Contains one OR multiple items (food, household goods, groceries, etc.)
+- Multiple items might be separated by commas, newlines, or dashes
 - Items might include quantities (2kg, 1L, 3 pieces, etc.)
 - Could be in different languages (English, Russian, Ukrainian)
-- Should have at least 2 recognizable products
+- Single clear shopping items should be treated as valid (e.g., "порошок", "молоко", "bread")
+- Common household/grocery products should have high confidence even when single
+- Avoid false positives for random words, names, or non-shopping related text
 
 Text to analyze: "{text}"
 

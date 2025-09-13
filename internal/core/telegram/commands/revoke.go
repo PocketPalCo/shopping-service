@@ -58,7 +58,7 @@ func (c *RevokeCommand) Handle(ctx context.Context, chatID int64, user *users.Us
 
 	// Check if user is already not authorized
 	if !targetUser.IsAuthorized {
-		displayName := getUserDisplayName(targetUser)
+		displayName := GetUserDisplayName(targetUser)
 		c.SendMessage(chatID, "✅ User "+displayName+" is already not authorized.")
 		return nil
 	}
@@ -77,8 +77,8 @@ func (c *RevokeCommand) Handle(ctx context.Context, chatID int64, user *users.Us
 		return err
 	}
 
-	displayName := getUserDisplayName(targetUser)
-	adminName := getUserDisplayName(user)
+	displayName := GetUserDisplayName(targetUser)
+	adminName := GetUserDisplayName(user)
 
 	// Send confirmation to admin
 	c.SendMessage(chatID, "✅ User "+displayName+" authorization has been revoked!")

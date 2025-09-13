@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // StatusCommand handles the /status command
@@ -70,6 +71,9 @@ func (c *StatusCommand) Handle(ctx context.Context, chatID int64, user *users.Us
 		return err
 	}
 
-	c.SendHTMLMessage(chatID, message)
+	// Create keyboard with Main Menu button
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(CreateMainMenuButton(c.templateManager, user.Locale))
+
+	c.SendMessageWithKeyboard(chatID, message, keyboard)
 	return nil
 }

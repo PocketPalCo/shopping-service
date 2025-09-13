@@ -427,7 +427,7 @@ func (s *Service) GetUserFamiliesWithInfo(ctx context.Context, userID uuid.UUID)
 		var family Family
 		var userRole string
 		var memberCount int
-		
+
 		err := rows.Scan(
 			&family.ID,
 			&family.Name,
@@ -442,7 +442,7 @@ func (s *Service) GetUserFamiliesWithInfo(ctx context.Context, userID uuid.UUID)
 			span.RecordError(err)
 			return nil, fmt.Errorf("failed to scan family with info: %w", err)
 		}
-		
+
 		familiesInfo = append(familiesInfo, &UserFamilyInfo{
 			Family:      &family,
 			UserRole:    userRole,
@@ -494,4 +494,21 @@ func (s *Service) GetFamilyMemberUserIDs(ctx context.Context, familyID, excludeU
 	}
 
 	return userIDs, nil
+}
+
+// GetTotalFamiliesCount returns the total number of families
+func (s *Service) GetTotalFamiliesCount(ctx context.Context) (int, error) {
+	ctx, span := tracer.Start(ctx, "families.GetTotalFamiliesCount")
+	defer span.End()
+
+	query := `SELECT COUNT(*) FROM families`
+
+	var count int
+	err := s.db.QueryRow(ctx, query).Scan(&count)
+	if err != nil {
+		span.RecordError(err)
+		return 0, fmt.Errorf("failed to get total families count: %w", err)
+	}
+
+	return count, nil
 }

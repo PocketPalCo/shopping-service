@@ -62,7 +62,7 @@ func (c *ListsCommand) Handle(ctx context.Context, chatID int64, user *users.Use
 	for _, listWithFamily := range listsWithFamilies {
 		var buttonText string
 		if showFamilyNames && listWithFamily.FamilyName != nil {
-			buttonText = fmt.Sprintf("📋 %s 🏠 %s", listWithFamily.Name, *listWithFamily.FamilyName)
+			buttonText = fmt.Sprintf("📋 %s 👥 %s", listWithFamily.Name, *listWithFamily.FamilyName)
 		} else {
 			buttonText = fmt.Sprintf("📋 %s", listWithFamily.Name)
 		}
@@ -77,6 +77,11 @@ func (c *ListsCommand) Handle(ctx context.Context, chatID int64, user *users.Use
 	// Add create new list button
 	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("create_new_list", user.Locale), "create_new_list"),
+	})
+
+	// Add main menu button
+	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("button_main_menu", user.Locale), "menu_start"),
 	})
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)

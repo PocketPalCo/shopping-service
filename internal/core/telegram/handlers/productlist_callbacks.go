@@ -14,9 +14,10 @@ import (
 
 // ProductListState represents the stored state data for product list selection
 type ProductListState struct {
-	MessageText     string                 `json:"message_text"`
-	DetectionResult map[string]interface{} `json:"detection_result"`
-	AvailableFamilies []map[string]interface{} `json:"available_families"`
+	MessageText          string                   `json:"message_text"`
+	DetectionResult      map[string]interface{}   `json:"detection_result"`
+	AvailableFamilies    []map[string]interface{} `json:"available_families"`
+	ProductListMessageID string                   `json:"product_list_message_id,omitempty"`
 }
 
 // ProductListCallbackHandler handles product list-related callbacks
@@ -68,6 +69,14 @@ func (h *ProductListCallbackHandler) handleProductListAddTo(ctx context.Context,
 	stateData, exists := h.stateManager.GetUserState(user.TelegramID, "product_list_selection")
 	if !exists || stateData == "" {
 		h.AnswerCallback(callback.ID, "❌ Session expired. Please try again.")
+
+		// Render localized error message
+		errorMsg, err := h.templateManager.RenderTemplate("productlist_errors", user.Locale, struct{ ErrorType string }{ErrorType: "session_expired"})
+		if err != nil {
+			h.logger.Error("Failed to render session expired error template", "error", err)
+			errorMsg = "❌ Session expired. Please try again."
+		}
+		h.EditMessage(callback.Message.Chat.ID, callback.Message.MessageID, errorMsg)
 		return
 	}
 
@@ -104,6 +113,14 @@ func (h *ProductListCallbackHandler) handleProductListAddTo(ctx context.Context,
 
 	h.AnswerCallback(callback.ID, "🔄 Adding items to list...")
 
+	// Show loading message immediately to prevent double clicks
+	loadingMsg, err := h.templateManager.RenderTemplate("processing_items", user.Locale, nil)
+	if err != nil {
+		h.logger.Error("Failed to render processing items template", "error", err)
+		loadingMsg = "🔄 <b>Processing items...</b>\n\nPlease wait while I analyze your shopping list."
+	}
+	h.EditMessage(callback.Message.Chat.ID, callback.Message.MessageID, loadingMsg)
+
 	// Detect language using AI
 	detectedLanguage, err := h.shoppingService.DetectLanguage(ctx, state.MessageText)
 	if err != nil {
@@ -122,19 +139,87 @@ func (h *ProductListCallbackHandler) handleProductListAddTo(ctx context.Context,
 	// Clear the user state since we've processed the request
 	h.stateManager.ClearUserState(user.TelegramID, "product_list_selection")
 
-	// Send success message
+	// Create localized success message
 	var message string
 	if len(items) > 0 {
+		var messageType string
 		if len(failedItems) == 0 {
-			message = fmt.Sprintf("✅ Added %d items to '%s'!", len(items), targetListName)
+			messageType = "items_added"
 		} else {
-			message = fmt.Sprintf("✅ Added %d items to '%s'!\n⚠️ %d items failed to process.", len(items), targetListName, len(failedItems))
+			messageType = "items_added_with_failures"
+		}
+
+		data := struct {
+			MessageType string
+			ItemsCount  int
+			ListName    string
+			FailedCount int
+		}{
+			MessageType: messageType,
+			ItemsCount:  len(items),
+			ListName:    targetListName,
+			FailedCount: len(failedItems),
+		}
+
+		renderedMsg, err := h.templateManager.RenderTemplate("productlist_success", user.Locale, data)
+		if err != nil {
+			h.logger.Error("Failed to render success template", "error", err)
+			if len(failedItems) == 0 {
+				message = fmt.Sprintf("✅ Added %d items to '%s'!", len(items), targetListName)
+			} else {
+				message = fmt.Sprintf("✅ Added %d items to '%s'!\n⚠️ %d items failed to process.", len(items), targetListName, len(failedItems))
+			}
+		} else {
+			message = renderedMsg
 		}
 	} else {
-		message = "❌ No items could be added to the list."
+		// Render error template for no items added
+		errorData := struct{ ErrorType string }{ErrorType: "no_items_added"}
+		renderedMsg, err := h.templateManager.RenderTemplate("productlist_errors", user.Locale, errorData)
+		if err != nil {
+			h.logger.Error("Failed to render no items error template", "error", err)
+			message = "❌ No items could be added to the list."
+		} else {
+			message = renderedMsg
+		}
 	}
 
-	h.SendMessage(callback.Message.Chat.ID, message)
+	// Create buttons to continue working with the list
+	buttons := [][]tgbotapi.InlineKeyboardButton{
+		{
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("add_another", user.Locale),
+				fmt.Sprintf("list_additem_%s", targetListID.String()[:8]),
+			),
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("view_list", user.Locale),
+				fmt.Sprintf("list_view_%s", targetListID.String()),
+			),
+		},
+		{
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("all_lists", user.Locale),
+				"show_all_lists",
+			),
+		},
+	}
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+	// Replace the product list selection message with updated list view instead of success message
+	listCallbackHandler := NewListCallbackHandler(h.BaseHandler, h.stateManager)
+	listViewMessage, listViewKeyboard, err := listCallbackHandler.BuildListViewMessage(ctx, targetListID, user)
+	if err != nil {
+		h.logger.Error("Failed to build updated list view", "error", err)
+		// Fallback to success message
+		h.EditMessageWithKeyboard(callback.Message.Chat.ID, callback.Message.MessageID, message, keyboard)
+	} else {
+		// Replace with updated list view
+		h.EditMessageWithKeyboard(callback.Message.Chat.ID, callback.Message.MessageID, listViewMessage, listViewKeyboard)
+
+		// Set viewing state so user can continue adding items by typing
+		viewStateData := fmt.Sprintf("%s:%d:%d", targetListID.String(), callback.Message.Chat.ID, callback.Message.MessageID)
+		h.stateManager.SetUserState(user.TelegramID, "viewing_list", viewStateData)
+	}
 }
 
 func (h *ProductListCallbackHandler) handleProductListCreate(ctx context.Context, callback *tgbotapi.CallbackQuery, createType string, parts []string, user *users.User) {
@@ -166,7 +251,16 @@ func (h *ProductListCallbackHandler) handleProductListCreate(ctx context.Context
 	case "custom":
 		// Start custom name flow
 		h.AnswerCallback(callback.ID, "✍️ Enter list name...")
-		h.SendMessage(callback.Message.Chat.ID, "📝 Please enter the name for your new shopping list:")
+
+		// Render localized prompt for list name
+		promptText, err := h.templateManager.RenderTemplate("productlist_custom_name_prompt", user.Locale, nil)
+		if err != nil {
+			h.logger.Error("Failed to render productlist custom name prompt template", "error", err)
+			promptText = "📝 Please enter the name for your new shopping list:"
+		}
+
+		// Replace the current message with a localized prompt for list name
+		h.EditMessage(callback.Message.Chat.ID, callback.Message.MessageID, promptText)
 		// Set user state for custom list creation
 		h.stateManager.SetUserState(user.TelegramID, "creating_custom_productlist", stateData)
 	default:
@@ -179,6 +273,14 @@ func (h *ProductListCallbackHandler) handleCreateAndAddItems(ctx context.Context
 	if callback.ID != "" {
 		h.AnswerCallback(callback.ID, "🔄 Creating new list...")
 	}
+
+	// Show loading message immediately to prevent double clicks
+	loadingMsg, err := h.templateManager.RenderTemplate("processing_items", user.Locale, nil)
+	if err != nil {
+		h.logger.Error("Failed to render processing items template", "error", err)
+		loadingMsg = "🔄 <b>Processing items...</b>\n\nPlease wait while I analyze your shopping list."
+	}
+	h.EditMessage(callback.Message.Chat.ID, callback.Message.MessageID, loadingMsg)
 
 	// Get user's families to determine which family to create the list for
 	// For now, we'll use the first family from the state or create for the first available family
@@ -207,7 +309,8 @@ func (h *ProductListCallbackHandler) handleCreateAndAddItems(ctx context.Context
 	list, err := h.shoppingService.CreateShoppingList(ctx, req)
 	if err != nil {
 		h.logger.Error("Failed to create shopping list", "error", err, "family_id", familyID, "name", listName)
-		h.SendMessage(callback.Message.Chat.ID, "❌ Failed to create new shopping list.")
+		// Replace the current message with error message
+		h.EditMessage(callback.Message.Chat.ID, callback.Message.MessageID, "❌ Failed to create new shopping list.")
 		return
 	}
 
@@ -222,35 +325,161 @@ func (h *ProductListCallbackHandler) handleCreateAndAddItems(ctx context.Context
 	items, failedItems, err := h.shoppingService.AddItemsToListWithAI(ctx, list.ID, state.MessageText, detectedLanguage, user.ID)
 	if err != nil {
 		h.logger.Error("Failed to add items to new list", "error", err, "list_id", list.ID)
-		h.SendMessage(callback.Message.Chat.ID, fmt.Sprintf("✅ Created list '%s' but failed to add items. Please try adding them manually.", listName))
+		// Replace the current message with partial success message
+		h.EditMessage(callback.Message.Chat.ID, callback.Message.MessageID, fmt.Sprintf("✅ Created list '%s' but failed to add items. Please try adding them manually.", listName))
 		return
 	}
 
 	// Clear the user state since we've processed the request
 	h.stateManager.ClearUserState(user.TelegramID, "product_list_selection")
 
-	// Send success message
+	// Create localized success message
 	var message string
 	if len(items) > 0 {
+		var messageType string
 		if len(failedItems) == 0 {
-			message = fmt.Sprintf("✅ Created list '%s' and added %d items!", listName, len(items))
+			messageType = "list_created"
 		} else {
-			message = fmt.Sprintf("✅ Created list '%s' and added %d items!\\n⚠️ %d items failed to process.", listName, len(items), len(failedItems))
+			messageType = "list_created_with_failures"
+		}
+
+		data := struct {
+			MessageType string
+			ItemsCount  int
+			ListName    string
+			FailedCount int
+		}{
+			MessageType: messageType,
+			ItemsCount:  len(items),
+			ListName:    listName,
+			FailedCount: len(failedItems),
+		}
+
+		renderedMsg, err := h.templateManager.RenderTemplate("productlist_success", user.Locale, data)
+		if err != nil {
+			h.logger.Error("Failed to render list creation success template", "error", err)
+			if len(failedItems) == 0 {
+				message = fmt.Sprintf("✅ Created list '%s' and added %d items!", listName, len(items))
+			} else {
+				message = fmt.Sprintf("✅ Created list '%s' and added %d items!\n⚠️ %d items failed to process.", listName, len(items), len(failedItems))
+			}
+		} else {
+			message = renderedMsg
 		}
 	} else {
-		message = fmt.Sprintf("✅ Created list '%s' but no items could be added.", listName)
+		// Render template for list created but no items added
+		data := struct {
+			MessageType string
+			ListName    string
+		}{
+			MessageType: "list_created_no_items",
+			ListName:    listName,
+		}
+
+		renderedMsg, err := h.templateManager.RenderTemplate("productlist_success", user.Locale, data)
+		if err != nil {
+			h.logger.Error("Failed to render list created no items template", "error", err)
+			message = fmt.Sprintf("✅ Created list '%s' but no items could be added.", listName)
+		} else {
+			message = renderedMsg
+		}
 	}
 
-	h.SendMessage(callback.Message.Chat.ID, message)
+	// Create buttons to continue working with the new list
+	buttons := [][]tgbotapi.InlineKeyboardButton{
+		{
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("add_item", user.Locale),
+				fmt.Sprintf("list_additem_%s", list.ID.String()[:8]),
+			),
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("view_list", user.Locale),
+				fmt.Sprintf("list_view_%s", list.ID.String()),
+			),
+		},
+		{
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("all_lists", user.Locale),
+				"show_all_lists",
+			),
+		},
+	}
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+	// Replace the product list selection message with updated list view instead of success message
+	listCallbackHandler := NewListCallbackHandler(h.BaseHandler, h.stateManager)
+	listViewMessage, listViewKeyboard, err := listCallbackHandler.BuildListViewMessage(ctx, list.ID, user)
+	if err != nil {
+		h.logger.Error("Failed to build updated list view for new list", "error", err)
+		// Fallback to success message
+		h.EditMessageWithKeyboard(callback.Message.Chat.ID, callback.Message.MessageID, message, keyboard)
+	} else {
+		// Replace with updated list view
+		h.EditMessageWithKeyboard(callback.Message.Chat.ID, callback.Message.MessageID, listViewMessage, listViewKeyboard)
+
+		// Set viewing state so user can continue adding items by typing
+		viewStateData := fmt.Sprintf("%s:%d:%d", list.ID.String(), callback.Message.Chat.ID, callback.Message.MessageID)
+		h.stateManager.SetUserState(user.TelegramID, "viewing_list", viewStateData)
+	}
 }
 
 func (h *ProductListCallbackHandler) handleProductListCancel(ctx context.Context, callback *tgbotapi.CallbackQuery, user *users.User) {
 	h.AnswerCallback(callback.ID, "❌ Operation cancelled.")
-	
+
 	// Clear the user state
 	h.stateManager.ClearUserState(user.TelegramID, "product_list_selection")
-	
-	h.SendMessage(callback.Message.Chat.ID, "❌ Operation cancelled.")
+
+	// Instead of sending a new message, replace the current message with the lists overview
+	// Get user's shopping lists to show them
+	lists, err := h.shoppingService.GetUserShoppingLists(ctx, user.ID)
+	if err != nil {
+		h.logger.Error("Failed to get user shopping lists for cancel", "error", err, "user_id", user.ID)
+		// Fallback to simple cancelled message as replacement
+		h.EditMessage(callback.Message.Chat.ID, callback.Message.MessageID, "❌ Operation cancelled.")
+		return
+	}
+
+	// Prepare lists overview data
+	data := struct {
+		Lists     []*shopping.ShoppingList
+		ListCount int
+	}{
+		Lists:     lists,
+		ListCount: len(lists),
+	}
+
+	// Render the lists template
+	content, err := h.templateManager.RenderTemplate("lists_overview", user.Locale, data)
+	if err != nil {
+		h.logger.Error("Failed to render lists overview template for cancel", "error", err)
+		// Fallback to simple cancelled message as replacement
+		h.EditMessage(callback.Message.Chat.ID, callback.Message.MessageID, "❌ Operation cancelled.")
+		return
+	}
+
+	// Create buttons for each list
+	var buttons [][]tgbotapi.InlineKeyboardButton
+	for _, list := range lists {
+		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardButtonData(
+				fmt.Sprintf("📋 %s", list.Name),
+				fmt.Sprintf("list_view_%s", list.ID.String()),
+			),
+		})
+	}
+
+	// Add action buttons
+	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData(
+			h.templateManager.RenderButton("create_list", user.Locale),
+			"create_list",
+		),
+	})
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+	// Replace the product list selection message with the lists overview
+	h.EditMessageWithKeyboard(callback.Message.Chat.ID, callback.Message.MessageID, content, keyboard)
 }
 
 // HandleCustomListNameInput handles user input for custom list name creation
@@ -277,6 +506,6 @@ func (h *ProductListCallbackHandler) HandleCustomListNameInput(ctx context.Conte
 			Chat: message.Chat,
 		},
 	}
-	
+
 	h.handleCreateAndAddItems(ctx, callback, listName, state, user)
 }

@@ -129,3 +129,4 @@ See `.env.example` for all available configuration options.
 - No existing test files found - create tests following Go conventions
 - Add to memory: Use localization for everithing
 - to memizize all prompts should be in separate files
+- to memorize: When add new command - also need add it to button menu

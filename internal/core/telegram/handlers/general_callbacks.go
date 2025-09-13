@@ -13,12 +13,14 @@ import (
 // GeneralCallbackHandler handles general callbacks like create list, show lists, etc.
 type GeneralCallbackHandler struct {
 	BaseHandler
+	stateManager *StateManager
 }
 
 // NewGeneralCallbackHandler creates a new general callback handler
-func NewGeneralCallbackHandler(base BaseHandler) *GeneralCallbackHandler {
+func NewGeneralCallbackHandler(base BaseHandler, stateManager *StateManager) *GeneralCallbackHandler {
 	return &GeneralCallbackHandler{
-		BaseHandler: base,
+		BaseHandler:  base,
+		stateManager: stateManager,
 	}
 }
 
@@ -56,7 +58,7 @@ func (h *GeneralCallbackHandler) HandleCreateNewList(ctx context.Context, callba
 	var buttons [][]tgbotapi.InlineKeyboardButton
 	for _, family := range families {
 		button := tgbotapi.NewInlineKeyboardButtonData(
-			fmt.Sprintf("🏠 %s", family.Name),
+			fmt.Sprintf("👥 %s", family.Name),
 			fmt.Sprintf("createlist_%s", family.ID.String()),
 		)
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{button})
@@ -133,7 +135,7 @@ func (h *GeneralCallbackHandler) HandleShowAllLists(ctx context.Context, callbac
 	for _, listWithFamily := range listsWithFamilies {
 		var buttonText string
 		if showFamilyNames && listWithFamily.FamilyName != nil {
-			buttonText = fmt.Sprintf("📋 %s 🏠 %s", listWithFamily.Name, *listWithFamily.FamilyName)
+			buttonText = fmt.Sprintf("📋 %s 👥 %s", listWithFamily.Name, *listWithFamily.FamilyName)
 		} else {
 			buttonText = fmt.Sprintf("📋 %s", listWithFamily.Name)
 		}
@@ -176,6 +178,11 @@ func (h *GeneralCallbackHandler) HandleShowAllLists(ctx context.Context, callbac
 
 	if _, err := h.bot.Send(editMsg); err != nil {
 		h.logger.Error("Failed to edit message for lists overview", "error", err)
+	} else {
+		// Track this message for future replacements
+		if h.stateManager != nil {
+			h.stateManager.SetUserState(user.TelegramID, "latest_bot_message_id", fmt.Sprintf("%d:%d", callback.Message.Chat.ID, callback.Message.MessageID))
+		}
 	}
 }
 
@@ -245,8 +252,9 @@ func (h *GeneralCallbackHandler) HandleCreateListForFamily(ctx context.Context, 
 		h.logger.Error("Failed to edit message for list name input", "error", err)
 	}
 
-	// Store state that user is creating list for this family - this would need to be implemented
-	// For now, we'll leave this as a TODO since the state management is in the bot service
+	// Store state that user is creating list for this family and the message ID for later replacement
+	h.stateManager.SetUserState(user.TelegramID, "creating_list_for_family", familyID.String())
+	h.stateManager.SetUserState(user.TelegramID, "create_list_message_id", fmt.Sprintf("%d:%d", callback.Message.Chat.ID, callback.Message.MessageID))
 	h.logger.Info("User entered create list state", "user_id", user.TelegramID, "family_id", familyID)
 }
 
@@ -323,7 +331,7 @@ func (h *GeneralCallbackHandler) HandleCompactListItem(ctx context.Context, call
 	}
 
 	// Delegate to the list callback handler for toggling the item
-	listHandler := NewListCallbackHandler(h.BaseHandler)
+	listHandler := NewListCallbackHandler(h.BaseHandler, h.stateManager)
 	listHandler.HandleToggleItem(ctx, callback, targetListID, targetItemID.String(), user)
 }
 
@@ -332,6 +340,19 @@ func (h *GeneralCallbackHandler) HandleShowCallback(ctx context.Context, callbac
 	if len(parts) < 2 {
 		h.AnswerCallback(callback.ID, "❌ Invalid show callback.")
 		return
+	}
+
+	// Clear all list-related states when navigating to lists overview
+	if h.stateManager != nil {
+		h.stateManager.ClearUserState(user.TelegramID, "viewing_list")
+		h.stateManager.ClearUserState(user.TelegramID, "adding_item_to_list")
+		h.stateManager.ClearUserState(user.TelegramID, "add_item_message_id")
+		h.stateManager.ClearUserState(user.TelegramID, "product_list_selection")
+		h.stateManager.ClearUserState(user.TelegramID, "creating_list_for_family")
+		h.stateManager.ClearUserState(user.TelegramID, "duplicate_resolution")
+		h.stateManager.ClearUserState(user.TelegramID, "creating_custom_productlist")
+		h.stateManager.ClearUserState(user.TelegramID, "replace_message_id")
+		h.logger.Info("Cleared all list-related states for lists overview", "user_id", user.TelegramID, "show_action", parts[1])
 	}
 
 	switch parts[1] {

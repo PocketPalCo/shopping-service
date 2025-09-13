@@ -7,6 +7,7 @@ import (
 
 	"github.com/PocketPalCo/shopping-service/internal/core/families"
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/google/uuid"
 )
 
@@ -47,7 +48,9 @@ func (c *CreateFamilyCommand) Handle(ctx context.Context, chatID int64, user *us
 			c.SendMessage(chatID, c.templateManager.RenderMessage("error_internal", user.Locale))
 			return err
 		}
-		c.SendHTMLMessage(chatID, message)
+		// Create keyboard with Main Menu button
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(CreateMainMenuButton(c.templateManager, user.Locale))
+		c.SendMessageWithKeyboard(chatID, message, keyboard)
 		return nil
 	}
 
@@ -67,7 +70,9 @@ func (c *CreateFamilyCommand) Handle(ctx context.Context, chatID int64, user *us
 			c.SendMessage(chatID, c.templateManager.RenderMessage("error_internal", user.Locale))
 			return err
 		}
-		c.SendHTMLMessage(chatID, message)
+		// Create keyboard with Main Menu button
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(CreateMainMenuButton(c.templateManager, user.Locale))
+		c.SendMessageWithKeyboard(chatID, message, keyboard)
 		return nil
 	}
 
@@ -88,7 +93,9 @@ func (c *CreateFamilyCommand) Handle(ctx context.Context, chatID int64, user *us
 			c.SendMessage(chatID, c.templateManager.RenderMessage("error_internal", user.Locale))
 			return err2
 		}
-		c.SendHTMLMessage(chatID, message)
+		// Create keyboard with Main Menu button
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(CreateMainMenuButton(c.templateManager, user.Locale))
+		c.SendMessageWithKeyboard(chatID, message, keyboard)
 		return err
 	}
 
@@ -110,7 +117,9 @@ func (c *CreateFamilyCommand) Handle(ctx context.Context, chatID int64, user *us
 		return err
 	}
 
-	c.SendHTMLMessage(chatID, message)
+	// Create keyboard with Main Menu button
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(CreateMainMenuButton(c.templateManager, user.Locale))
+	c.SendMessageWithKeyboard(chatID, message, keyboard)
 
 	c.logger.Info("Family created successfully",
 		"family_id", family.ID,

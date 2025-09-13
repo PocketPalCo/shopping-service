@@ -1,0 +1,8 @@
+{{if eq .MessageType "items_added"}}✅ Добавлено {{.ItemsCount}} товаров в '{{.ListName}}'!{{end}}
+{{if eq .MessageType "items_added_with_failures"}}✅ Добавлено {{.ItemsCount}} товаров в '{{.ListName}}'!
+⚠️ {{.FailedCount}} товаров не удалось обработать.{{end}}
+{{if eq .MessageType "list_created"}}✅ Создан список '{{.ListName}}' и добавлено {{.ItemsCount}} товаров!{{end}}
+{{if eq .MessageType "list_created_with_failures"}}✅ Создан список '{{.ListName}}' и добавлено {{.ItemsCount}} товаров!
+⚠️ {{.FailedCount}} товаров не удалось обработать.{{end}}
+{{if eq .MessageType "list_created_no_items"}}✅ Создан список '{{.ListName}}', но не удалось добавить товары.{{end}}
+{{if eq .MessageType "list_created_add_failed"}}✅ Создан список '{{.ListName}}', но не удалось добавить товары. Попробуйте добавить их вручную.{{end}}
