@@ -3,6 +3,7 @@ package handlers
 import (
 	"log/slog"
 
+	"github.com/PocketPalCo/shopping-service/internal/core/cloud"
 	"github.com/PocketPalCo/shopping-service/internal/core/families"
 	"github.com/PocketPalCo/shopping-service/internal/core/shopping"
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
@@ -22,6 +23,7 @@ type BaseHandler struct {
 	usersService    *users.Service
 	familiesService *families.Service
 	shoppingService *shopping.Service
+	cloudService    *cloud.Service
 	templateManager TemplateRenderer
 	logger          *slog.Logger
 }

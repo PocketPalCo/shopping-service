@@ -62,6 +62,15 @@ type Config struct {
 
 	// STT Service Configuration
 	STTServiceURL string `mapstructure:"SSV_STT_SERVICE_URL"`
+
+	// Cloud Storage Configuration
+	CloudProvider              string `mapstructure:"SSV_CLOUD_PROVIDER"`
+	AzureStorageConnectionString string `mapstructure:"SSV_AZURE_STORAGE_CONNECTION_STRING"`
+	AzureStorageAccountName      string `mapstructure:"SSV_AZURE_STORAGE_ACCOUNT_NAME"`
+	AzureStorageAccountKey       string `mapstructure:"SSV_AZURE_STORAGE_ACCOUNT_KEY"`
+	AzureStorageContainerName    string `mapstructure:"SSV_AZURE_STORAGE_CONTAINER_NAME"`
+	AzureStorageBaseURL          string `mapstructure:"SSV_AZURE_STORAGE_BASE_URL"`
+	AzureStorageUseHTTPS         bool   `mapstructure:"SSV_AZURE_STORAGE_USE_HTTPS"`
 }
 
 // DefaultConfig generates a config with sane defaults.
@@ -113,6 +122,15 @@ func DefaultConfig() Config {
 
 		// STT service defaults
 		STTServiceURL: "http://localhost:8000",
+
+		// Cloud storage defaults
+		CloudProvider:              "azure",
+		AzureStorageConnectionString: "",
+		AzureStorageAccountName:      "",
+		AzureStorageAccountKey:       "",
+		AzureStorageContainerName:    "files",
+		AzureStorageBaseURL:          "",
+		AzureStorageUseHTTPS:         true,
 	}
 }
 
@@ -174,6 +192,14 @@ func ConfigFromEnvironment() (config Config, err error) {
 	viper.SetDefault("SSV_OPENAI_USE_RESPONSES_API", config.OpenAIUseResponsesAPI)
 	viper.SetDefault("SSV_OPENAI_STORE", config.OpenAIStore)
 	viper.SetDefault("SSV_OPENAI_REASONING_EFFORT", config.OpenAIReasoningEffort)
+	viper.SetDefault("SSV_STT_SERVICE_URL", config.STTServiceURL)
+	viper.SetDefault("SSV_CLOUD_PROVIDER", config.CloudProvider)
+	viper.SetDefault("SSV_AZURE_STORAGE_CONNECTION_STRING", config.AzureStorageConnectionString)
+	viper.SetDefault("SSV_AZURE_STORAGE_ACCOUNT_NAME", config.AzureStorageAccountName)
+	viper.SetDefault("SSV_AZURE_STORAGE_ACCOUNT_KEY", config.AzureStorageAccountKey)
+	viper.SetDefault("SSV_AZURE_STORAGE_CONTAINER_NAME", config.AzureStorageContainerName)
+	viper.SetDefault("SSV_AZURE_STORAGE_BASE_URL", config.AzureStorageBaseURL)
+	viper.SetDefault("SSV_AZURE_STORAGE_USE_HTTPS", config.AzureStorageUseHTTPS)
 
 	// Override config values with environment variables
 	viper.AutomaticEnv()
@@ -284,4 +310,36 @@ type OpenAIConfig struct {
 	UseResponsesAPI bool   // Use new Responses API instead of Chat Completions
 	Store           bool   // Enable stateful context for better reasoning
 	ReasoningEffort string // "low", "medium", "high" for GPT-5 reasoning
+}
+
+// GetCloudConfig converts config values to cloud storage configuration struct.
+func (c Config) GetCloudConfig() CloudConfig {
+	return CloudConfig{
+		Provider: c.CloudProvider,
+		Azure: AzureCloudConfig{
+			StorageAccountName:   c.AzureStorageAccountName,
+			StorageAccountKey:    c.AzureStorageAccountKey,
+			ConnectionString:     c.AzureStorageConnectionString,
+			ContainerName:        c.AzureStorageContainerName,
+			BaseURL:              c.AzureStorageBaseURL,
+			UseHTTPS:             c.AzureStorageUseHTTPS,
+		},
+	}
+}
+
+// CloudConfig holds cloud storage configuration
+type CloudConfig struct {
+	Provider string
+	Azure    AzureCloudConfig
+	// AWS and GCP configs can be added later
+}
+
+// AzureCloudConfig holds Azure Blob Storage specific configuration
+type AzureCloudConfig struct {
+	StorageAccountName string
+	StorageAccountKey  string
+	ConnectionString   string
+	ContainerName      string
+	BaseURL            string
+	UseHTTPS           bool
 }
