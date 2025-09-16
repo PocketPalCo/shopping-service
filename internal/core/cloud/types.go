@@ -25,12 +25,28 @@ type Provider interface {
 
 	// GetFileInfo retrieves metadata about a file
 	GetFileInfo(ctx context.Context, fileID string) (*FileInfo, error)
+
+	// DownloadFile downloads file content directly from cloud storage
+	DownloadFile(ctx context.Context, fileID string) ([]byte, error)
+
+	// Folder operations
+	// CreateFolder creates a virtual folder (in blob storage, this creates a marker blob)
+	CreateFolder(ctx context.Context, folderPath string) error
+
+	// ListFolders lists folders within a path
+	ListFolders(ctx context.Context, parentPath string) ([]*FolderInfo, error)
+
+	// DeleteFolder deletes a folder and all its contents
+	DeleteFolder(ctx context.Context, folderPath string) error
 }
 
 // UploadRequest contains parameters for file upload
 type UploadRequest struct {
 	// FileID is the unique identifier for the file (can be auto-generated if empty)
 	FileID string
+
+	// FolderPath is the virtual folder path (e.g., "users/123/documents")
+	FolderPath string
 
 	// FileName is the original filename
 	FileName string
@@ -77,6 +93,12 @@ type ListFilesRequest struct {
 	// Prefix filters files by prefix
 	Prefix string
 
+	// FolderPath limits results to a specific folder
+	FolderPath string
+
+	// Recursive includes files from subfolders
+	Recursive bool
+
 	// MaxResults limits the number of results (0 for no limit)
 	MaxResults int
 
@@ -101,8 +123,14 @@ type FileInfo struct {
 	// FileID is the unique identifier for the file
 	FileID string
 
+	// FolderPath is the virtual folder path
+	FolderPath string
+
 	// FileName is the original filename
 	FileName string
+
+	// RelativePath is the full path including folder and filename
+	RelativePath string
 
 	// Size is the file size in bytes
 	Size int64
@@ -124,6 +152,36 @@ type FileInfo struct {
 
 	// Tags are used for organization and billing
 	Tags map[string]string
+}
+
+// FolderInfo contains metadata about a folder
+type FolderInfo struct {
+	// FolderPath is the full folder path
+	FolderPath string
+
+	// FolderName is the folder name (last segment of path)
+	FolderName string
+
+	// ParentPath is the parent folder path
+	ParentPath string
+
+	// FileCount is the number of files in this folder
+	FileCount int64
+
+	// SubfolderCount is the number of subfolders
+	SubfolderCount int64
+
+	// TotalSize is the total size of all files in bytes
+	TotalSize int64
+
+	// CreatedAt is when the folder was created
+	CreatedAt time.Time
+
+	// LastModified is when the folder was last modified
+	LastModified time.Time
+
+	// Metadata contains custom metadata
+	Metadata map[string]string
 }
 
 // Config contains cloud provider configuration

@@ -52,8 +52,19 @@ func NewService(cfg config.CloudConfig, logger *slog.Logger) (*Service, error) {
 	}, nil
 }
 
-// UploadFileFromTelegram uploads a file from Telegram with metadata
+// UploadFileFromTelegram uploads a file from Telegram with metadata organized in user folders
 func (s *Service) UploadFileFromTelegram(ctx context.Context, userID int64, chatID int64, fileName string, content io.Reader, contentType string, contentLength int64) (*FileUploadResult, error) {
+	// Generate user-specific folder path
+	userFolderPath := s.generateUserFolderPath(userID)
+
+	// Ensure user folder exists
+	err := s.ensureUserFolder(ctx, userID)
+	if err != nil {
+		s.logger.Warn("Failed to ensure user folder exists", "user_id", userID, "error", err)
+		// Continue without folder - files will go to root
+		userFolderPath = ""
+	}
+
 	// Generate metadata
 	metadata := map[string]string{
 		"source":   "telegram",
@@ -66,10 +77,12 @@ func (s *Service) UploadFileFromTelegram(ctx context.Context, userID int64, chat
 	tags := map[string]string{
 		"source": "telegram",
 		"type":   s.getFileType(fileName, contentType),
+		"user":   fmt.Sprintf("%d", userID),
 	}
 
-	// Prepare upload request
+	// Prepare upload request with folder path
 	uploadReq := &UploadRequest{
+		FolderPath:    userFolderPath,
 		FileName:      fileName,
 		ContentType:   contentType,
 		Content:       content,
@@ -151,10 +164,15 @@ func (s *Service) DeleteFile(ctx context.Context, fileID string) error {
 	return nil
 }
 
-// ListUserFiles lists files uploaded by a specific user
+// ListUserFiles lists files uploaded by a specific user in their folder
 func (s *Service) ListUserFiles(ctx context.Context, userID int64, maxResults int) ([]*FileInfo, error) {
-	// Use prefix filtering to get files for this user
+	// Get user folder path
+	userFolderPath := s.generateUserFolderPath(userID)
+
+	// List files in user's folder
 	listReq := &ListFilesRequest{
+		FolderPath: userFolderPath,
+		Recursive:  true,
 		MaxResults: maxResults,
 	}
 
@@ -164,22 +182,12 @@ func (s *Service) ListUserFiles(ctx context.Context, userID int64, maxResults in
 		return nil, fmt.Errorf("failed to list files: %w", err)
 	}
 
-	// Filter files by user ID from metadata
-	var userFiles []*FileInfo
-	for _, file := range listResp.Files {
-		if file.Metadata != nil {
-			if fileUserID, exists := file.Metadata["user_id"]; exists && fileUserID == fmt.Sprintf("%d", userID) {
-				userFiles = append(userFiles, file)
-			}
-		}
-	}
-
 	s.logger.Info("Listed user files",
 		"user_id", userID,
-		"total_files", len(listResp.Files),
-		"user_files", len(userFiles))
+		"folder_path", userFolderPath,
+		"user_files", len(listResp.Files))
 
-	return userFiles, nil
+	return listResp.Files, nil
 }
 
 // GetFileInfo retrieves detailed information about a file
@@ -266,6 +274,250 @@ func (s *Service) getFileType(fileName, contentType string) string {
 	}
 
 	return "unknown"
+}
+
+// CreateUserFolder creates a folder for a specific user
+func (s *Service) CreateUserFolder(ctx context.Context, userID int64) error {
+	folderPath := s.generateUserFolderPath(userID)
+
+	err := s.provider.CreateFolder(ctx, folderPath)
+	if err != nil {
+		s.logger.Error("Failed to create user folder", "user_id", userID, "folder_path", folderPath, "error", err)
+		return fmt.Errorf("failed to create user folder: %w", err)
+	}
+
+	s.logger.Info("Successfully created user folder", "user_id", userID, "folder_path", folderPath)
+	return nil
+}
+
+// CreateUserSubfolder creates a subfolder within a user's directory
+func (s *Service) CreateUserSubfolder(ctx context.Context, userID int64, subfolderName string) error {
+	userFolderPath := s.generateUserFolderPath(userID)
+	subfolderPath := fmt.Sprintf("%s/%s", userFolderPath, subfolderName)
+
+	// Ensure user's main folder exists first
+	err := s.ensureUserFolder(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to ensure user folder exists: %w", err)
+	}
+
+	err = s.provider.CreateFolder(ctx, subfolderPath)
+	if err != nil {
+		s.logger.Error("Failed to create user subfolder",
+			"user_id", userID,
+			"subfolder_name", subfolderName,
+			"subfolder_path", subfolderPath,
+			"error", err)
+		return fmt.Errorf("failed to create subfolder: %w", err)
+	}
+
+	s.logger.Info("Successfully created user subfolder",
+		"user_id", userID,
+		"subfolder_name", subfolderName,
+		"subfolder_path", subfolderPath)
+	return nil
+}
+
+// ListUserFolders lists all folders within a user's directory
+func (s *Service) ListUserFolders(ctx context.Context, userID int64) ([]*FolderInfo, error) {
+	userFolderPath := s.generateUserFolderPath(userID)
+
+	folders, err := s.provider.ListFolders(ctx, userFolderPath)
+	if err != nil {
+		s.logger.Error("Failed to list user folders", "user_id", userID, "folder_path", userFolderPath, "error", err)
+		return nil, fmt.Errorf("failed to list user folders: %w", err)
+	}
+
+	s.logger.Info("Listed user folders",
+		"user_id", userID,
+		"folder_path", userFolderPath,
+		"folders_count", len(folders))
+
+	return folders, nil
+}
+
+// DeleteUserFolder deletes a user's folder and all its contents
+func (s *Service) DeleteUserFolder(ctx context.Context, userID int64) error {
+	folderPath := s.generateUserFolderPath(userID)
+
+	err := s.provider.DeleteFolder(ctx, folderPath)
+	if err != nil {
+		s.logger.Error("Failed to delete user folder", "user_id", userID, "folder_path", folderPath, "error", err)
+		return fmt.Errorf("failed to delete user folder: %w", err)
+	}
+
+	s.logger.Info("Successfully deleted user folder", "user_id", userID, "folder_path", folderPath)
+	return nil
+}
+
+// UploadFileToUserSubfolder uploads a file to a specific subfolder within user's directory
+func (s *Service) UploadFileToUserSubfolder(ctx context.Context, userID int64, subfolderName, fileName string, content io.Reader, contentType string, contentLength int64) (*FileUploadResult, error) {
+	userFolderPath := s.generateUserFolderPath(userID)
+	subfolderPath := fmt.Sprintf("%s/%s", userFolderPath, subfolderName)
+
+	// Ensure subfolder exists
+	err := s.provider.CreateFolder(ctx, subfolderPath)
+	if err != nil {
+		s.logger.Warn("Failed to create subfolder", "user_id", userID, "subfolder", subfolderName, "error", err)
+	}
+
+	// Generate metadata
+	metadata := map[string]string{
+		"user_id":   fmt.Sprintf("%d", userID),
+		"subfolder": subfolderName,
+		"uploaded":  time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Generate tags for organization
+	tags := map[string]string{
+		"user":      fmt.Sprintf("%d", userID),
+		"subfolder": subfolderName,
+		"type":      s.getFileType(fileName, contentType),
+	}
+
+	// Prepare upload request
+	uploadReq := &UploadRequest{
+		FolderPath:    subfolderPath,
+		FileName:      fileName,
+		ContentType:   contentType,
+		Content:       content,
+		ContentLength: contentLength,
+		Metadata:      metadata,
+		Tags:          tags,
+	}
+
+	// Upload file
+	uploadResp, err := s.provider.UploadFile(ctx, uploadReq)
+	if err != nil {
+		s.logger.Error("Failed to upload file to user subfolder",
+			"user_id", userID,
+			"subfolder", subfolderName,
+			"file_name", fileName,
+			"error", err)
+		return nil, fmt.Errorf("upload failed: %w", err)
+	}
+
+	result := &FileUploadResult{
+		FileID:      uploadResp.FileID,
+		PublicURL:   uploadResp.PublicURL,
+		Size:        uploadResp.Size,
+		ContentType: uploadResp.ContentType,
+		UploadedAt:  uploadResp.UploadedAt,
+		Metadata:    metadata,
+	}
+
+	s.logger.Info("Successfully uploaded file to user subfolder",
+		"user_id", userID,
+		"subfolder", subfolderName,
+		"file_name", fileName,
+		"file_id", uploadResp.FileID,
+		"size", uploadResp.Size,
+		"public_url", uploadResp.PublicURL)
+
+	return result, nil
+}
+
+// generateUserFolderPath generates a folder path for a specific user
+func (s *Service) generateUserFolderPath(userID int64) string {
+	return fmt.Sprintf("users/%d", userID)
+}
+
+// ensureUserFolder ensures that a user's folder exists, creating it if necessary
+func (s *Service) ensureUserFolder(ctx context.Context, userID int64) error {
+	folderPath := s.generateUserFolderPath(userID)
+
+	// Try to create the folder - it's fine if it already exists
+	err := s.provider.CreateFolder(ctx, folderPath)
+	if err != nil {
+		// Check if the error is about folder already existing
+		if cloudErr, ok := err.(*CloudError); ok {
+			if cloudErr.Code == "FOLDER_CREATE_FAILED" &&
+				(strings.Contains(strings.ToLower(cloudErr.Message), "already exists") ||
+					strings.Contains(strings.ToLower(cloudErr.Message), "containeralreadyexists")) {
+				// Folder already exists, which is fine
+				return nil
+			}
+		}
+		return err
+	}
+
+	return nil
+}
+
+// UploadReceiptFile uploads a receipt file with UUID-based user ID
+func (s *Service) UploadReceiptFile(ctx context.Context, userID string, fileName string, content io.Reader, contentType string, contentLength int64) (*FileUploadResult, error) {
+	// Generate user-specific folder path using UUID string
+	userFolderPath := fmt.Sprintf("users/%s/receipts", userID)
+
+	// Generate metadata
+	metadata := map[string]string{
+		"source":   "receipt_upload",
+		"user_id":  userID,
+		"uploaded": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Generate tags for organization
+	tags := map[string]string{
+		"source": "receipt",
+		"type":   s.getFileType(fileName, contentType),
+		"user":   userID,
+	}
+
+	// Prepare upload request with folder path
+	uploadReq := &UploadRequest{
+		FolderPath:    userFolderPath,
+		FileName:      fileName,
+		ContentType:   contentType,
+		Content:       content,
+		ContentLength: contentLength,
+		Metadata:      metadata,
+		Tags:          tags,
+	}
+
+	// Upload file
+	uploadResp, err := s.provider.UploadFile(ctx, uploadReq)
+	if err != nil {
+		s.logger.Error("Failed to upload receipt file",
+			"user_id", userID,
+			"file_name", fileName,
+			"content_type", contentType,
+			"file_size", contentLength,
+			"error", err)
+		return nil, fmt.Errorf("failed to upload receipt file: %w", err)
+	}
+
+	s.logger.Info("Receipt file uploaded successfully",
+		"user_id", userID,
+		"file_name", fileName,
+		"file_id", uploadResp.FileID,
+		"public_url", uploadResp.PublicURL,
+		"file_size", contentLength)
+
+	return &FileUploadResult{
+		FileID:      uploadResp.FileID,
+		PublicURL:   uploadResp.PublicURL,
+		Size:        contentLength,
+		ContentType: contentType,
+		UploadedAt:  time.Now().UTC(),
+		Metadata:    metadata,
+	}, nil
+}
+
+// DownloadFile downloads file content using the cloud provider
+func (s *Service) DownloadFile(ctx context.Context, fileID string) ([]byte, error) {
+	data, err := s.provider.DownloadFile(ctx, fileID)
+	if err != nil {
+		s.logger.Error("Failed to download file",
+			"file_id", fileID,
+			"error", err)
+		return nil, fmt.Errorf("failed to download file: %w", err)
+	}
+
+	s.logger.Info("Successfully downloaded file",
+		"file_id", fileID,
+		"size", len(data))
+
+	return data, nil
 }
 
 // FileUploadResult contains the result of a file upload operation

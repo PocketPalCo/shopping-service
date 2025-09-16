@@ -1,0 +1,9 @@
+📋 <b>Ваши Чеки</b> ({{.Total}} всего) - Страница {{.Page}} из {{.TotalPages}}
+
+{{range .Receipts}}
+🧾 <b>{{.MerchantName}}</b>
+{{if .TotalAmount}}💰 €{{printf "%.2f" .TotalAmount}}{{end}}
+📅 {{.CreatedAt}}
+{{if .Processed}}✅ Обработан{{else}}⏳ Обрабатывается{{end}}
+
+{{end}}

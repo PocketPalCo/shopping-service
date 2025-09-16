@@ -9,9 +9,9 @@ import (
 
 	"github.com/PocketPalCo/shopping-service/internal/core/ai"
 	"github.com/PocketPalCo/shopping-service/internal/core/families"
-	"github.com/PocketPalCo/shopping-service/internal/core/language"
 	"github.com/PocketPalCo/shopping-service/internal/core/shopping"
 	"github.com/PocketPalCo/shopping-service/internal/core/telegram/commands"
+	"github.com/PocketPalCo/shopping-service/internal/core/translations"
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/google/uuid"
@@ -186,8 +186,8 @@ func (h *MessageHandler) HandleShoppingListNameInput(ctx context.Context, messag
 	h.stateManager.ClearUserState(user.TelegramID, "creating_list_for_family")
 	h.stateManager.ClearUserState(user.TelegramID, "create_list_message_id")
 
-	// TODO: Notify family members about the new list
-	// This would require implementing the notification system
+	// Feature placeholder: Family notification system will be implemented
+	// This will notify family members when new shopping lists are created
 }
 
 // HandleAddItemInput processes user input when adding an item to a shopping list
@@ -224,7 +224,7 @@ func (h *MessageHandler) HandleAddItemInput(ctx context.Context, message *tgbota
 	detectedLanguage, err := h.shoppingService.DetectLanguage(ctx, itemText)
 	if err != nil {
 		h.logger.Error("Failed to detect language, falling back to user locale", "error", err, "item_text", itemText)
-		detectedLanguage = language.NormalizeLanguageCode(user.Locale)
+		detectedLanguage = translations.NormalizeLanguageCode(user.Locale)
 	}
 
 	h.logger.Info("Language detection for item input",
@@ -275,11 +275,11 @@ func (h *MessageHandler) HandleAddItemInput(ctx context.Context, message *tgbota
 		return
 	}
 
-	// TODO: Notify family members about each new item
-	// This would require implementing the notification system
+	// Feature placeholder: Item notification system will be implemented
+	// This will notify family members when new items are added to shared lists
 
-	// TODO: Clear user state
-	// This would need to be implemented since state management is in the bot service
+	// Feature placeholder: State management cleanup will be implemented
+	// This will clear user input state after successful item addition
 
 	// Prepare success message based on results
 	var successText string

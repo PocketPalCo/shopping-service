@@ -148,7 +148,11 @@ func (h *ListCallbackHandler) BuildListViewMessage(ctx context.Context, listID u
 	}
 
 	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("complete_list", user.Locale), fmt.Sprintf("list_complete_%s", listID.String())),
 		tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("refresh", user.Locale), fmt.Sprintf("list_view_%s", listID.String())),
+	})
+
+	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("all_lists", user.Locale), "show_all_lists"),
 		tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("home", user.Locale), "menu_start"),
 	})
@@ -295,6 +299,62 @@ func (h *ListCallbackHandler) HandleToggleItem(ctx context.Context, callback *tg
 	h.HandleViewList(ctx, callback, listID, user)
 }
 
+// HandleCompleteList archives a shopping list
+func (h *ListCallbackHandler) HandleCompleteList(ctx context.Context, callback *tgbotapi.CallbackQuery, listID uuid.UUID, user *users.User) {
+	// Get the shopping list to verify access and get name
+	list, err := h.shoppingService.GetShoppingListByID(ctx, listID)
+	if err != nil || list == nil {
+		h.logger.Error("Failed to get shopping list", "error", err, "list_id", listID)
+		h.AnswerCallback(callback.ID, "❌ List not found.")
+		return
+	}
+
+	// Archive the list
+	err = h.shoppingService.ArchiveShoppingList(ctx, listID)
+	if err != nil {
+		h.logger.Error("Failed to archive shopping list", "error", err, "list_id", listID)
+		h.AnswerCallback(callback.ID, "❌ Failed to complete list.")
+		return
+	}
+
+	h.AnswerCallback(callback.ID, fmt.Sprintf("✅ List '%s' completed and archived!", list.Name))
+
+	// Render localized completion message
+	data := struct {
+		ListName string
+	}{
+		ListName: list.Name,
+	}
+
+	message, err := h.templateManager.RenderTemplate("list_completed_success", user.Locale, data)
+	if err != nil {
+		h.logger.Error("Failed to render list completion template", "error", err)
+		message = fmt.Sprintf("✅ <b>%s</b> has been completed and archived!\n\nYou can find it in your completed lists.", list.Name)
+	}
+
+	// Navigate back to all lists view
+	editMsg := tgbotapi.NewEditMessageText(
+		callback.Message.Chat.ID,
+		callback.Message.MessageID,
+		message,
+	)
+	editMsg.ParseMode = tgbotapi.ModeHTML
+
+	// Add button to go back to lists
+	backButton := [][]tgbotapi.InlineKeyboardButton{
+		{
+			tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("all_lists", user.Locale), "show_all_lists"),
+			tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("home", user.Locale), "menu_start"),
+		},
+	}
+	backKeyboard := tgbotapi.NewInlineKeyboardMarkup(backButton...)
+	editMsg.ReplyMarkup = &backKeyboard
+
+	if _, err := h.bot.Send(editMsg); err != nil {
+		h.logger.Error("Failed to edit message after completing list", "error", err)
+	}
+}
+
 // HandleListCallback handles list_* callbacks (moved from bot_service.go)
 func (h *ListCallbackHandler) HandleListCallback(ctx context.Context, callback *tgbotapi.CallbackQuery, parts []string, user *users.User, stateManager *StateManager) {
 	if len(parts) < 3 {
@@ -328,6 +388,8 @@ func (h *ListCallbackHandler) HandleListCallback(ctx context.Context, callback *
 		if len(parts) >= 4 {
 			h.HandleToggleItem(ctx, callback, listID, parts[3], user)
 		}
+	case "complete":
+		h.HandleCompleteList(ctx, callback, listID, user)
 	default:
 		h.AnswerCallback(callback.ID, "❌ Unknown list action.")
 	}

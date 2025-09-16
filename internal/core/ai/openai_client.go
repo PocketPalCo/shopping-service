@@ -377,7 +377,7 @@ func (c *openAIClient) parseAIResponse(content string) (*ParsedResult, error) {
 
 func (c *openAIClient) parseItemsWithResponsesAPI(ctx context.Context, rawText, languageCode string) ([]*ParsedResult, error) {
 	prompt := c.buildMultiItemPrompt(rawText, languageCode)
-	
+
 	if prompt == "" {
 		return nil, fmt.Errorf("failed to build multi-item prompt")
 	}
@@ -427,7 +427,12 @@ func (c *openAIClient) parseItemsWithResponsesAPI(ctx context.Context, rawText, 
 		c.logger.Error("[MULTI] HTTP request to OpenAI failed", "error", err)
 		return nil, fmt.Errorf("failed to make responses request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+
+		}
+	}(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -514,7 +519,12 @@ func (c *openAIClient) parseItemsWithChatCompletions(ctx context.Context, rawTex
 		c.logger.Error("[MULTI-CHAT] HTTP request to OpenAI failed", "error", err)
 		return nil, fmt.Errorf("failed to make chat completion request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+
+		}
+	}(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -807,7 +817,7 @@ func (c *openAIClient) DetectProductList(ctx context.Context, text string) (*Pro
 
 	// Parse the JSON response
 	content = strings.TrimSpace(content)
-	
+
 	// Find JSON in the response
 	start := strings.Index(content, "{")
 	end := strings.LastIndex(content, "}")
@@ -835,6 +845,303 @@ func (c *openAIClient) DetectProductList(ctx context.Context, text string) (*Pro
 		"detected_items_count", result.DetectedItemsCount,
 		"sample_items", result.SampleItems,
 		"model", reqData.Model)
+
+	return &result, nil
+}
+
+// Translate translates text from one language to another using OpenAI Responses API
+func (c *openAIClient) Translate(ctx context.Context, originalText, originalLanguage, targetLanguage string) (*TranslationResult, error) {
+	// Build prompt using PromptBuilder
+	var prompt string
+	if c.promptBuilder != nil {
+		var err error
+		prompt, err = c.promptBuilder.BuildTranslationPrompt(originalText, originalLanguage, targetLanguage)
+		if err != nil {
+			c.logger.Error("Failed to build translation prompt from file", "error", err)
+			return nil, fmt.Errorf("translation prompt file is required: %w", err)
+		}
+	} else {
+		c.logger.Error("PromptBuilder is not available for translation")
+		return nil, fmt.Errorf("prompt builder is required for translation")
+	}
+
+	// Use Responses API only
+	reqData := ResponsesRequest{
+		Model: c.config.Model,
+		Input: []ResponsesMessage{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Reasoning: &ResponsesReasoning{Effort: "low"}, // Translation doesn't need high reasoning
+	}
+
+	// Enable storage if configured
+	if c.config.Store {
+		reqData.Store = &c.config.Store
+	}
+
+	reqJSON, err := json.Marshal(reqData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal translation request: %w", err)
+	}
+
+	c.logger.Info("[TRANSLATE] Sending translation request to OpenAI Responses API",
+		"url", c.config.BaseURL+"/responses",
+		"model", reqData.Model,
+		"original_text", originalText,
+		"from", originalLanguage,
+		"to", targetLanguage)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.config.BaseURL+"/responses", bytes.NewReader(reqJSON))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create translation request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("translation API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read translation response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("translation API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var apiResp ResponsesResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal translation response: %w", err)
+	}
+
+	// Extract text from responses output
+	translatedText, err := c.extractOutputText(apiResp.Output)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract translated text: %w", err)
+	}
+
+	// Clean up the response
+	translatedText = strings.TrimSpace(translatedText)
+
+	// Calculate confidence
+	confidence := c.calculateTranslationConfidence(originalText, translatedText, originalLanguage, targetLanguage)
+
+	c.logger.Info("Successfully translated text with Responses API",
+		"original_text", originalText,
+		"translated_text", translatedText,
+		"from", originalLanguage,
+		"to", targetLanguage,
+		"confidence", confidence,
+		"model", reqData.Model)
+
+	return &TranslationResult{
+		TranslatedText: translatedText,
+		Confidence:     confidence,
+	}, nil
+}
+
+// calculateTranslationConfidence estimates translation confidence based on heuristics
+func (c *openAIClient) calculateTranslationConfidence(originalText, translatedText, originalLanguage, targetLanguage string) float64 {
+	// Base confidence for successful translation
+	confidence := 0.8
+
+	// Boost confidence if the translation is significantly different (indicates actual translation occurred)
+	if originalText != translatedText {
+		confidence += 0.1
+	}
+
+	// Reduce confidence if translation is empty or too similar when languages are different
+	if strings.TrimSpace(translatedText) == "" {
+		return 0.1
+	}
+
+	// Reduce confidence if translation is identical to original when languages should be different
+	normalizedOrigLang := strings.ToLower(strings.TrimSpace(originalLanguage))
+	normalizedTargetLang := strings.ToLower(strings.TrimSpace(targetLanguage))
+	if normalizedOrigLang != normalizedTargetLang && strings.TrimSpace(originalText) == strings.TrimSpace(translatedText) {
+		confidence = 0.6 // Lower confidence for likely non-translation
+	}
+
+	// Boost confidence for known high-quality model responses
+	if c.config.Model == "gpt-5" || c.config.Model == "gpt-5-nano" {
+		confidence += 0.05
+	}
+
+	// Ensure confidence stays within bounds
+	if confidence > 1.0 {
+		confidence = 1.0
+	}
+	if confidence < 0.1 {
+		confidence = 0.1
+	}
+
+	return confidence
+}
+
+// BatchTranslateReceiptItems translates multiple receipt items in a single request
+func (c *openAIClient) BatchTranslateReceiptItems(ctx context.Context, req *BatchTranslationRequest) (*BatchTranslationResult, error) {
+	if len(req.Items) == 0 {
+		return &BatchTranslationResult{
+			DetectedLanguage: "",
+			TargetLanguage:   req.TargetLocale,
+			Translations:     []ReceiptItemTranslation{},
+			Confidence:       1.0,
+		}, nil
+	}
+
+	// Build batch translation prompt
+	prompt, err := c.buildBatchTranslationPrompt(req.Items, req.TargetLocale)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build batch translation prompt: %w", err)
+	}
+
+	// Use configured model with low reasoning for translation
+	reqData := ResponsesRequest{
+		Model: c.config.Model, // Use configured model (gpt-5-nano)
+		Input: []ResponsesMessage{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Reasoning: &ResponsesReasoning{Effort: "low"}, // Low effort is sufficient for translation
+	}
+
+	// Enable storage if configured
+	if c.config.Store {
+		reqData.Store = &c.config.Store
+	}
+
+	reqJSON, err := json.Marshal(reqData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal batch translation request: %w", err)
+	}
+
+	c.logger.Info("[BATCH-TRANSLATE] Sending batch translation request to OpenAI Responses API",
+		"url", c.config.BaseURL+"/responses",
+		"model", reqData.Model,
+		"items_count", len(req.Items),
+		"target_locale", req.TargetLocale,
+		"items", req.Items)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.config.BaseURL+"/responses", bytes.NewReader(reqJSON))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create batch translation request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("batch translation API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read batch translation response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("batch translation API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var apiResp ResponsesResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal batch translation response: %w", err)
+	}
+
+	// Extract text from responses output
+	responseText, err := c.extractOutputText(apiResp.Output)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract batch translation text: %w", err)
+	}
+
+	// Parse the batch translation response
+	result, err := c.parseBatchTranslationResponse(responseText, req.Items, req.TargetLocale)
+	if err != nil {
+		c.logger.Error("Failed to parse batch translation response",
+			"error", err,
+			"response", responseText,
+			"items_count", len(req.Items))
+		return nil, fmt.Errorf("failed to parse batch translation response: %w", err)
+	}
+
+	c.logger.Info("Successfully batch translated receipt items",
+		"items_count", len(req.Items),
+		"target_locale", req.TargetLocale,
+		"detected_language", result.DetectedLanguage,
+		"translations_count", len(result.Translations),
+		"confidence", result.Confidence,
+		"model", reqData.Model)
+
+	return result, nil
+}
+
+// buildBatchTranslationPrompt creates a prompt for batch translation of receipt items
+func (c *openAIClient) buildBatchTranslationPrompt(items []string, targetLocale string) (string, error) {
+	if c.promptBuilder == nil {
+		return "", fmt.Errorf("prompt builder is not available - batch translation requires prompt files")
+	}
+
+	prompt, err := c.promptBuilder.BuildBatchTranslationPrompt(items, targetLocale)
+	if err != nil {
+		return "", fmt.Errorf("failed to build batch translation prompt from file: %w", err)
+	}
+	return prompt, nil
+}
+
+// parseBatchTranslationResponse parses the AI response for batch translation
+func (c *openAIClient) parseBatchTranslationResponse(content string, originalItems []string, targetLocale string) (*BatchTranslationResult, error) {
+	// Clean up the response
+	content = strings.TrimSpace(content)
+
+	// Find JSON in the response
+	start := strings.Index(content, "{")
+	end := strings.LastIndex(content, "}")
+
+	if start == -1 || end == -1 || start >= end {
+		return nil, fmt.Errorf("no valid JSON found in batch translation response: %s", content)
+	}
+
+	jsonStr := content[start : end+1]
+
+	var result BatchTranslationResult
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal batch translation JSON: %w - content: %s", err, jsonStr)
+	}
+
+	// Validate the result
+	if result.Confidence < 0.0 || result.Confidence > 1.0 {
+		result.Confidence = 0.8 // Default confidence
+	}
+
+	// Ensure we have translations for all items
+	if len(result.Translations) != len(originalItems) {
+		return nil, fmt.Errorf("batch translation returned %d translations for %d items - AI must translate all items", len(result.Translations), len(originalItems))
+	}
+
+	// Validate each translation
+	for i := range result.Translations {
+		if result.Translations[i].Confidence < 0.0 || result.Translations[i].Confidence > 1.0 {
+			result.Translations[i].Confidence = 0.7 // Default confidence for individual items
+		}
+		if result.Translations[i].DetectedLanguage == "" {
+			result.Translations[i].DetectedLanguage = result.DetectedLanguage
+		}
+		if result.Translations[i].TargetLanguage == "" {
+			result.Translations[i].TargetLanguage = result.TargetLanguage
+		}
+	}
 
 	return &result, nil
 }

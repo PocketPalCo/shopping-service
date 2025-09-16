@@ -64,13 +64,19 @@ type Config struct {
 	STTServiceURL string `mapstructure:"SSV_STT_SERVICE_URL"`
 
 	// Cloud Storage Configuration
-	CloudProvider              string `mapstructure:"SSV_CLOUD_PROVIDER"`
+	CloudProvider                string `mapstructure:"SSV_CLOUD_PROVIDER"`
 	AzureStorageConnectionString string `mapstructure:"SSV_AZURE_STORAGE_CONNECTION_STRING"`
 	AzureStorageAccountName      string `mapstructure:"SSV_AZURE_STORAGE_ACCOUNT_NAME"`
 	AzureStorageAccountKey       string `mapstructure:"SSV_AZURE_STORAGE_ACCOUNT_KEY"`
 	AzureStorageContainerName    string `mapstructure:"SSV_AZURE_STORAGE_CONTAINER_NAME"`
 	AzureStorageBaseURL          string `mapstructure:"SSV_AZURE_STORAGE_BASE_URL"`
 	AzureStorageUseHTTPS         bool   `mapstructure:"SSV_AZURE_STORAGE_USE_HTTPS"`
+
+	// Azure Document Intelligence Configuration
+	AzureDocumentIntelligenceEndpoint   string `mapstructure:"SSV_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"`
+	AzureDocumentIntelligenceAPIKey     string `mapstructure:"SSV_AZURE_DOCUMENT_INTELLIGENCE_API_KEY"`
+	AzureDocumentIntelligenceAPIVersion string `mapstructure:"SSV_AZURE_DOCUMENT_INTELLIGENCE_API_VERSION"`
+	AzureDocumentIntelligenceModel      string `mapstructure:"SSV_AZURE_DOCUMENT_INTELLIGENCE_RECEIPT_MODEL"`
 }
 
 // DefaultConfig generates a config with sane defaults.
@@ -124,13 +130,19 @@ func DefaultConfig() Config {
 		STTServiceURL: "http://localhost:8000",
 
 		// Cloud storage defaults
-		CloudProvider:              "azure",
+		CloudProvider:                "azure",
 		AzureStorageConnectionString: "",
 		AzureStorageAccountName:      "",
 		AzureStorageAccountKey:       "",
 		AzureStorageContainerName:    "files",
 		AzureStorageBaseURL:          "",
 		AzureStorageUseHTTPS:         true,
+
+		// Azure Document Intelligence defaults
+		AzureDocumentIntelligenceEndpoint:   "",
+		AzureDocumentIntelligenceAPIKey:     "",
+		AzureDocumentIntelligenceAPIVersion: "2024-11-30",
+		AzureDocumentIntelligenceModel:      "prebuilt-receipt",
 	}
 }
 
@@ -200,6 +212,10 @@ func ConfigFromEnvironment() (config Config, err error) {
 	viper.SetDefault("SSV_AZURE_STORAGE_CONTAINER_NAME", config.AzureStorageContainerName)
 	viper.SetDefault("SSV_AZURE_STORAGE_BASE_URL", config.AzureStorageBaseURL)
 	viper.SetDefault("SSV_AZURE_STORAGE_USE_HTTPS", config.AzureStorageUseHTTPS)
+	viper.SetDefault("SSV_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", config.AzureDocumentIntelligenceEndpoint)
+	viper.SetDefault("SSV_AZURE_DOCUMENT_INTELLIGENCE_API_KEY", config.AzureDocumentIntelligenceAPIKey)
+	viper.SetDefault("SSV_AZURE_DOCUMENT_INTELLIGENCE_API_VERSION", config.AzureDocumentIntelligenceAPIVersion)
+	viper.SetDefault("SSV_AZURE_DOCUMENT_INTELLIGENCE_RECEIPT_MODEL", config.AzureDocumentIntelligenceModel)
 
 	// Override config values with environment variables
 	viper.AutomaticEnv()
@@ -317,12 +333,12 @@ func (c Config) GetCloudConfig() CloudConfig {
 	return CloudConfig{
 		Provider: c.CloudProvider,
 		Azure: AzureCloudConfig{
-			StorageAccountName:   c.AzureStorageAccountName,
-			StorageAccountKey:    c.AzureStorageAccountKey,
-			ConnectionString:     c.AzureStorageConnectionString,
-			ContainerName:        c.AzureStorageContainerName,
-			BaseURL:              c.AzureStorageBaseURL,
-			UseHTTPS:             c.AzureStorageUseHTTPS,
+			StorageAccountName: c.AzureStorageAccountName,
+			StorageAccountKey:  c.AzureStorageAccountKey,
+			ConnectionString:   c.AzureStorageConnectionString,
+			ContainerName:      c.AzureStorageContainerName,
+			BaseURL:            c.AzureStorageBaseURL,
+			UseHTTPS:           c.AzureStorageUseHTTPS,
 		},
 	}
 }
@@ -342,4 +358,22 @@ type AzureCloudConfig struct {
 	ContainerName      string
 	BaseURL            string
 	UseHTTPS           bool
+}
+
+// GetDocumentIntelligenceConfig converts config values to Document Intelligence configuration struct.
+func (c Config) GetDocumentIntelligenceConfig() DocumentIntelligenceConfig {
+	return DocumentIntelligenceConfig{
+		Endpoint:   c.AzureDocumentIntelligenceEndpoint,
+		APIKey:     c.AzureDocumentIntelligenceAPIKey,
+		APIVersion: c.AzureDocumentIntelligenceAPIVersion,
+		Model:      c.AzureDocumentIntelligenceModel,
+	}
+}
+
+// DocumentIntelligenceConfig holds Azure Document Intelligence configuration
+type DocumentIntelligenceConfig struct {
+	Endpoint   string
+	APIKey     string
+	APIVersion string
+	Model      string
 }

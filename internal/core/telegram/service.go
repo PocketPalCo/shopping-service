@@ -7,8 +7,10 @@ import (
 
 	"github.com/PocketPalCo/shopping-service/config"
 	"github.com/PocketPalCo/shopping-service/internal/core/ai"
+	"github.com/PocketPalCo/shopping-service/internal/core/cloud"
 	"github.com/PocketPalCo/shopping-service/internal/core/families"
 	"github.com/PocketPalCo/shopping-service/internal/core/products"
+	"github.com/PocketPalCo/shopping-service/internal/core/receipts"
 	"github.com/PocketPalCo/shopping-service/internal/core/shopping"
 	"github.com/PocketPalCo/shopping-service/internal/core/stt"
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
@@ -72,14 +74,29 @@ func NewTelegramService(cfg *config.Config, db *pgxpool.Pool, logger *slog.Logge
 	aiClient := ai.NewOpenAIClient(openAIConfig, logger, productsService)
 
 	// Create the AI service with the client
-	aiService := ai.NewService(db, aiClient, logger)
+	aiService, err := ai.NewService(db, aiClient, *cfg, logger)
+	if err != nil {
+		logger.Error("failed to initialize AI service", "error", err)
+		return nil, err
+	}
 
 	shoppingService := shopping.NewService(db, aiService)
+
+	// Initialize cloud storage service
+	cloudConfig := cfg.GetCloudConfig()
+	cloudService, err := cloud.NewService(cloudConfig, logger)
+	if err != nil {
+		logger.Error("failed to initialize cloud service", "error", err)
+		return nil, err
+	}
+
+	// Initialize receipts service
+	receiptsService := receipts.NewService(db, cloudService, aiService, logger)
 
 	// Initialize STT client
 	sttClient := stt.NewClient(cfg.STTServiceURL)
 
-	botService, err := NewBotService(cfg.TelegramBotToken, usersService, familiesService, shoppingService, sttClient, logger, cfg.TelegramDebug)
+	botService, err := NewBotService(cfg.TelegramBotToken, usersService, familiesService, shoppingService, receiptsService, sttClient, logger, cfg.TelegramDebug)
 	if err != nil {
 		logger.Error("failed to initialize telegram bot", "error", err)
 		return nil, err

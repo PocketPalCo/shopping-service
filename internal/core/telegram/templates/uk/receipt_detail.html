@@ -1,0 +1,32 @@
+🧾 <b>Деталі Чека</b>
+
+📋 <b>{{.Receipt.FileName}}</b>
+{{if .Receipt.MerchantName}}🏪 <b>{{.Receipt.MerchantName}}</b>{{end}}
+{{if .Receipt.MerchantAddress}}📍 {{.Receipt.MerchantAddress}}{{end}}
+{{if .Receipt.MerchantPhone}}📞 {{.Receipt.MerchantPhone}}{{end}}
+
+💰 <b>Фінансова Зведення</b>
+{{if .TotalAmount}}💶 Загальна сума: €{{printf "%.2f" .TotalAmount}}{{end}}
+{{if .NetAmount}}📊 Чиста сума: €{{printf "%.2f" .NetAmount}}{{end}}
+{{if .TotalTax}}🏛️ Податок: €{{printf "%.2f" .TotalTax}}{{end}}
+{{if .Receipt.CurrencyCode}}💱 Валюта: {{.Receipt.CurrencyCode}}{{end}}
+
+📅 <b>Інформація про Транзакцію</b>
+{{if .Receipt.TransactionDate}}📆 Дата: {{.Receipt.TransactionDate.Format "2006-01-02"}}{{end}}
+{{if .Receipt.TransactionTime}}🕐 Час: {{.Receipt.TransactionTime.Format "15:04:05"}}{{end}}
+{{if .Receipt.ReceiptType}}📝 Тип: {{.Receipt.ReceiptType}}{{end}}
+
+{{if .Items}}
+🛒 <b>Товари ({{len .Items}})</b>
+{{range .Items}}
+• <b>{{if .LocalizedDescription}}{{.LocalizedDescription}}{{else}}{{.OriginalDescription}}{{end}}</b>{{if and .LocalizedDescription .OriginalDescription}} ({{.OriginalDescription}}){{end}}
+  {{if .Quantity}}Кіл-ть: {{printf "%.1f" .Quantity}}{{end}}{{if .UnitPrice}} • €{{printf "%.2f" .UnitPrice}}{{end}} • Всього: €{{printf "%.2f" .TotalPrice}}
+{{end}}
+{{end}}
+
+🤖 <b>Інформація ШІ</b>
+{{if .Receipt.DetectedLanguage}}🗣️ Мова: {{.Receipt.DetectedLanguage}}{{end}}
+{{if .AIConfidence}}🎯 Впевненість: {{printf "%.1f" .AIConfidence}}%{{end}}
+{{if .Receipt.ExtractionModelVersion}}🧠 Модель: {{.Receipt.ExtractionModelVersion}}{{end}}
+
+📅 Оброблено: {{.Receipt.CreatedAt.Format "2006-01-02 15:04"}}

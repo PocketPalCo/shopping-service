@@ -76,7 +76,10 @@ func (c *StartCommand) createMainMenu(user *users.User) tgbotapi.InlineKeyboardM
 				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_createfamily", user.Locale), "menu_createfamily"),
 			},
 			{
+				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_receipts", user.Locale), "menu_receipts"),
 				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_help", user.Locale), "menu_help"),
+			},
+			{
 				tgbotapi.NewInlineKeyboardButtonData(c.templateManager.RenderButton("menu_status", user.Locale), "menu_status"),
 			},
 		}

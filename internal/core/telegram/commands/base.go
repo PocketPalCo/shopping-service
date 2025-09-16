@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/PocketPalCo/shopping-service/internal/core/families"
+	"github.com/PocketPalCo/shopping-service/internal/core/receipts"
 	"github.com/PocketPalCo/shopping-service/internal/core/shopping"
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -22,6 +23,7 @@ type BaseCommand struct {
 	usersService    *users.Service
 	familiesService *families.Service
 	shoppingService *shopping.Service
+	receiptsService *receipts.Service
 	templateManager TemplateRenderer
 	logger          *slog.Logger
 }
@@ -32,6 +34,7 @@ func NewBaseCommand(
 	usersService *users.Service,
 	familiesService *families.Service,
 	shoppingService *shopping.Service,
+	receiptsService *receipts.Service,
 	templateManager TemplateRenderer,
 	logger *slog.Logger,
 ) BaseCommand {
@@ -40,6 +43,7 @@ func NewBaseCommand(
 		usersService:    usersService,
 		familiesService: familiesService,
 		shoppingService: shoppingService,
+		receiptsService: receiptsService,
 		templateManager: templateManager,
 		logger:          logger,
 	}

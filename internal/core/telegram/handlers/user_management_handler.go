@@ -25,6 +25,7 @@ type BotInternalUser struct {
 	TelegramID   int64
 	IsAdmin      bool
 	IsAuthorized bool
+	IsNewUser    bool // Indicates if this user was just created
 }
 
 // GetOrCreateInternalUser gets or creates an internal user from Telegram user info
@@ -43,6 +44,7 @@ func (h *UserManagementHandler) GetOrCreateInternalUser(ctx context.Context, tel
 			TelegramID:   existingUser.TelegramID,
 			IsAdmin:      h.usersService.IsAdmin(existingUser.TelegramID),
 			IsAuthorized: existingUser.IsAuthorized,
+			IsNewUser:    false, // Existing user
 		}, nil
 	}
 
@@ -88,6 +90,7 @@ func (h *UserManagementHandler) GetOrCreateInternalUser(ctx context.Context, tel
 		TelegramID:   newUser.TelegramID,
 		IsAdmin:      h.usersService.IsAdmin(newUser.TelegramID),
 		IsAuthorized: newUser.IsAuthorized,
+		IsNewUser:    true, // Newly created user
 	}, nil
 }
 

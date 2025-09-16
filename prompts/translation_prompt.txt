@@ -1,0 +1,13 @@
+Translate the following text from {original_language} to {target_language}.
+
+Context:
+- Preserve the original meaning and context
+- Keep the translation concise and natural
+- If the text contains brand names or proper nouns, keep them unchanged
+- Return ONLY the translated text, no explanations
+
+Original language: {original_language}
+Target language: {target_language}
+Original text: "{original_text}"
+
+Translated text:

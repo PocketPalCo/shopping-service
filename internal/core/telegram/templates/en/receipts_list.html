@@ -1,0 +1,13 @@
+📋 <b>Your Receipts</b> ({{.Total}} total) - Page {{.Page}} of {{.TotalPages}}
+
+{{range .Receipts}}
+🧾 <b>{{.MerchantName}}</b>
+{{if .TotalAmount}}💰 €{{printf "%.2f" .TotalAmount}}{{end}}
+📅 {{.CreatedAt}}
+{{if .Processed}}✅ Processed{{else}}⏳ Processing...{{end}}
+
+{{end}}
+
+{{if gt .Total 0}}
+<i>Tap a button below to view receipt details:</i>
+{{end}}

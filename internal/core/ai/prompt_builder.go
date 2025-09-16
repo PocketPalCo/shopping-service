@@ -253,6 +253,7 @@ func (pb *PromptBuilder) ValidatePromptFiles() error {
 		"language_detection_prompt.txt",
 		"single_item_instructions.txt",
 		"multi_item_instructions.txt",
+		"batch_translation_prompt.txt",
 	}
 
 	for _, file := range requiredFiles {
@@ -299,6 +300,45 @@ func (pb *PromptBuilder) BuildProductListDetectionPrompt(text string) (string, e
 
 	// Replace placeholder with actual text
 	prompt := strings.Replace(promptTemplate, "{text}", text, -1)
+
+	return prompt, nil
+}
+
+// BuildTranslationPrompt creates a translation prompt for receipt item descriptions
+func (pb *PromptBuilder) BuildTranslationPrompt(originalText, originalLanguage, targetLanguage string) (string, error) {
+	// Load translation prompt template
+	promptTemplate, err := pb.loadPromptFile("translation_prompt.txt")
+	if err != nil {
+		return "", fmt.Errorf("failed to load translation prompt: %w", err)
+	}
+
+	// Replace placeholders with actual values
+	prompt := strings.Replace(promptTemplate, "{original_text}", originalText, -1)
+	prompt = strings.Replace(prompt, "{original_language}", originalLanguage, -1)
+	prompt = strings.Replace(prompt, "{target_language}", targetLanguage, -1)
+
+	return prompt, nil
+}
+
+// BuildBatchTranslationPrompt creates a batch translation prompt for receipt items
+func (pb *PromptBuilder) BuildBatchTranslationPrompt(items []string, targetLocale string) (string, error) {
+	// Load batch translation prompt template
+	promptTemplate, err := pb.loadPromptFile("batch_translation_prompt.txt")
+	if err != nil {
+		return "", fmt.Errorf("failed to load batch translation prompt: %w", err)
+	}
+
+	// Create JSON string of items
+	itemsJSON := ""
+	if len(items) > 0 {
+		itemsJSON = `["` + strings.Join(items, `", "`) + `"]`
+	} else {
+		itemsJSON = "[]"
+	}
+
+	// Replace placeholders with actual values
+	prompt := strings.Replace(promptTemplate, "{target_locale}", targetLocale, -1)
+	prompt = strings.Replace(prompt, "{items_json}", itemsJSON, -1)
 
 	return prompt, nil
 }

@@ -1,0 +1,32 @@
+🧾 <b>Receipt Details</b>
+
+📋 <b>{{.Receipt.FileName}}</b>
+{{if .Receipt.MerchantName}}🏪 <b>{{.Receipt.MerchantName}}</b>{{end}}
+{{if .Receipt.MerchantAddress}}📍 {{.Receipt.MerchantAddress}}{{end}}
+{{if .Receipt.MerchantPhone}}📞 {{.Receipt.MerchantPhone}}{{end}}
+
+💰 <b>Financial Summary</b>
+{{if .TotalAmount}}💶 Total: €{{printf "%.2f" .TotalAmount}}{{end}}
+{{if .NetAmount}}📊 Net: €{{printf "%.2f" .NetAmount}}{{end}}
+{{if .TotalTax}}🏛️ Tax: €{{printf "%.2f" .TotalTax}}{{end}}
+{{if .Receipt.CurrencyCode}}💱 Currency: {{.Receipt.CurrencyCode}}{{end}}
+
+📅 <b>Transaction Info</b>
+{{if .Receipt.TransactionDate}}📆 Date: {{.Receipt.TransactionDate.Format "2006-01-02"}}{{end}}
+{{if .Receipt.TransactionTime}}🕐 Time: {{.Receipt.TransactionTime.Format "15:04:05"}}{{end}}
+{{if .Receipt.ReceiptType}}📝 Type: {{.Receipt.ReceiptType}}{{end}}
+
+{{if .Items}}
+🛒 <b>Items ({{len .Items}})</b>
+{{range .Items}}
+• <b>{{if .LocalizedDescription}}{{.LocalizedDescription}}{{else}}{{.OriginalDescription}}{{end}}</b>{{if and .LocalizedDescription .OriginalDescription}} ({{.OriginalDescription}}){{end}}
+  {{if .Quantity}}Qty: {{printf "%.1f" .Quantity}}{{end}}{{if .UnitPrice}} • €{{printf "%.2f" .UnitPrice}}{{end}} • Total: €{{printf "%.2f" .TotalPrice}}
+{{end}}
+{{end}}
+
+🤖 <b>AI Info</b>
+{{if .Receipt.DetectedLanguage}}🗣️ Language: {{.Receipt.DetectedLanguage}}{{end}}
+{{if .AIConfidence}}🎯 Confidence: {{printf "%.1f" .AIConfidence}}%{{end}}
+{{if .Receipt.ExtractionModelVersion}}🧠 Model: {{.Receipt.ExtractionModelVersion}}{{end}}
+
+📅 Processed: {{.Receipt.CreatedAt.Format "2006-01-02 15:04"}}

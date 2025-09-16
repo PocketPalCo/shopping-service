@@ -5,6 +5,7 @@ import (
 
 	"github.com/PocketPalCo/shopping-service/internal/core/cloud"
 	"github.com/PocketPalCo/shopping-service/internal/core/families"
+	"github.com/PocketPalCo/shopping-service/internal/core/receipts"
 	"github.com/PocketPalCo/shopping-service/internal/core/shopping"
 	"github.com/PocketPalCo/shopping-service/internal/core/users"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -23,6 +24,7 @@ type BaseHandler struct {
 	usersService    *users.Service
 	familiesService *families.Service
 	shoppingService *shopping.Service
+	receiptsService *receipts.Service
 	cloudService    *cloud.Service
 	templateManager TemplateRenderer
 	logger          *slog.Logger
@@ -34,6 +36,7 @@ func NewBaseHandler(
 	usersService *users.Service,
 	familiesService *families.Service,
 	shoppingService *shopping.Service,
+	receiptsService *receipts.Service,
 	templateManager TemplateRenderer,
 	logger *slog.Logger,
 ) BaseHandler {
@@ -42,6 +45,7 @@ func NewBaseHandler(
 		usersService:    usersService,
 		familiesService: familiesService,
 		shoppingService: shoppingService,
+		receiptsService: receiptsService,
 		templateManager: templateManager,
 		logger:          logger,
 	}

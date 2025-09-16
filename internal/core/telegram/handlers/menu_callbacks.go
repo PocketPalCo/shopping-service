@@ -72,6 +72,8 @@ func (h *MenuCallbackHandler) HandleMenuCallback(ctx context.Context, callback *
 		commandName = "status"
 	case "myid":
 		commandName = "myid"
+	case "receipts":
+		commandName = "receipts"
 	case "users":
 		// Admin only
 		if !h.usersService.IsAdmin(user.TelegramID) {
@@ -111,6 +113,8 @@ func (h *MenuCallbackHandler) HandleMenuCallback(ctx context.Context, callback *
 		h.handleCreateFamilyMenuEdit(ctx, callback, user)
 	case "myid":
 		h.handleMyIDMenuEdit(ctx, callback, user)
+	case "receipts":
+		h.handleReceiptsMenuEdit(ctx, callback, user)
 	case "users":
 		h.handleUsersMenuEdit(ctx, callback, user)
 	case "stats":
@@ -177,7 +181,10 @@ func (h *MenuCallbackHandler) createMainMenu(user *users.User) tgbotapi.InlineKe
 				tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("menu_createfamily", user.Locale), "menu_createfamily"),
 			},
 			{
+				tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("menu_receipts", user.Locale), "menu_receipts"),
 				tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("menu_help", user.Locale), "menu_help"),
+			},
+			{
 				tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("menu_status", user.Locale), "menu_status"),
 			},
 		}
@@ -233,7 +240,7 @@ func (h *MenuCallbackHandler) handleListsMenuEdit(ctx context.Context, callback 
 			message = "📝 You don't have any shopping lists yet."
 		}
 		keyboard = tgbotapi.NewInlineKeyboardMarkup([]tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("menu_start", user.Locale), "menu_start"),
+			tgbotapi.NewInlineKeyboardButtonData(h.templateManager.RenderButton("main_menu", user.Locale), "menu_start"),
 		})
 	} else {
 		// Create buttons for each list
@@ -473,6 +480,38 @@ func (h *MenuCallbackHandler) handleMyIDMenuEdit(ctx context.Context, callback *
 	h.answerCallback(callback.ID, "")
 }
 
+// handleReceiptsMenuEdit handles the receipts command by editing the existing message
+func (h *MenuCallbackHandler) handleReceiptsMenuEdit(ctx context.Context, callback *tgbotapi.CallbackQuery, user *users.User) {
+	// Render receipts menu directly instead of executing command
+	data := struct {
+		IsAuthorized bool
+		UserName     string
+	}{
+		IsAuthorized: user.IsAuthorized,
+		UserName:     user.FirstName,
+	}
+
+	// Render receipts menu message
+	message, err := h.templateManager.RenderTemplate("receipts_menu", user.Locale, data)
+	if err != nil {
+		h.logger.Error("Failed to render receipts menu template", "error", err)
+		// Use template system for error messages
+		errorMsg, _ := h.templateManager.RenderTemplate("receipts_list_error", user.Locale, nil)
+		if errorMsg == "" {
+			errorMsg, _ = h.templateManager.RenderTemplate("receipts_list_error", "en", nil)
+		}
+		h.answerCallback(callback.ID, errorMsg)
+		return
+	}
+
+	// Create receipts menu keyboard
+	keyboard := h.createReceiptsMenuKeyboard(user.Locale)
+
+	// Edit the existing message
+	h.EditMessageWithKeyboard(callback.Message.Chat.ID, callback.Message.MessageID, message, keyboard)
+	h.answerCallback(callback.ID, "🧾 Receipts menu")
+}
+
 // handleUsersMenuEdit handles the users command by editing the existing message (admin only)
 func (h *MenuCallbackHandler) handleUsersMenuEdit(ctx context.Context, callback *tgbotapi.CallbackQuery, user *users.User) {
 	// Check admin access
@@ -586,4 +625,44 @@ func (h *MenuCallbackHandler) handleLanguageMenuEdit(ctx context.Context, callba
 
 	h.EditMessageWithKeyboard(callback.Message.Chat.ID, callback.Message.MessageID, message, keyboard)
 	h.answerCallback(callback.ID, "")
+}
+
+// createReceiptsMenuKeyboard creates the receipts menu inline keyboard
+func (h *MenuCallbackHandler) createReceiptsMenuKeyboard(locale string) tgbotapi.InlineKeyboardMarkup {
+	rows := [][]tgbotapi.InlineKeyboardButton{
+		// First row: Upload Receipt
+		{
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("upload_receipt", locale),
+				"receipts:upload",
+			),
+		},
+		// Second row: View Receipts
+		{
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("view_receipts", locale),
+				"receipts:view",
+			),
+		},
+		// Third row: Tax Summary and Statistics
+		{
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("tax_summary", locale),
+				"receipts:taxes",
+			),
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("receipt_stats", locale),
+				"receipts:stats",
+			),
+		},
+		// Fourth row: Main Menu
+		{
+			tgbotapi.NewInlineKeyboardButtonData(
+				h.templateManager.RenderButton("main_menu", locale),
+				"menu_start",
+			),
+		},
+	}
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }

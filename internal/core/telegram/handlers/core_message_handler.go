@@ -18,18 +18,20 @@ type InternalUser = BotInternalUser
 // CoreMessageHandler handles all core message processing
 type CoreMessageHandler struct {
 	BaseHandler
-	sttService      *stt.Client
-	commandRegistry *commands.CommandRegistry
-	stateManager    *StateManager
+	sttService              *stt.Client
+	commandRegistry         *commands.CommandRegistry
+	stateManager            *StateManager
+	receiptsCallbackHandler *ReceiptsCallbackHandler
 }
 
 // NewCoreMessageHandler creates a new core message handler
-func NewCoreMessageHandler(base BaseHandler, sttService *stt.Client, commandRegistry *commands.CommandRegistry, stateManager *StateManager) *CoreMessageHandler {
+func NewCoreMessageHandler(base BaseHandler, sttService *stt.Client, commandRegistry *commands.CommandRegistry, stateManager *StateManager, receiptsCallbackHandler *ReceiptsCallbackHandler) *CoreMessageHandler {
 	return &CoreMessageHandler{
-		BaseHandler:     base,
-		sttService:      sttService,
-		commandRegistry: commandRegistry,
-		stateManager:    stateManager,
+		BaseHandler:             base,
+		sttService:              sttService,
+		commandRegistry:         commandRegistry,
+		stateManager:            stateManager,
+		receiptsCallbackHandler: receiptsCallbackHandler,
 	}
 }
 
@@ -416,6 +418,85 @@ func (h *CoreMessageHandler) HandleAudioMessage(ctx context.Context, message *tg
 		if _, err := h.bot.Send(msg); err != nil {
 			h.logger.Error("Failed to send STT unavailable message", "error", err)
 		}
+	}
+}
+
+// HandlePhotoMessage processes photo messages for receipt upload
+func (h *CoreMessageHandler) HandlePhotoMessage(ctx context.Context, message *tgbotapi.Message, user *InternalUser) {
+	if !user.IsAuthorized {
+		h.logger.Debug("Ignoring photo message from unauthorized user",
+			"user_id", user.TelegramID)
+		return
+	}
+
+	h.logger.Info("Processing photo message",
+		"user_id", user.TelegramID,
+		"chat_id", message.Chat.ID,
+		"photos_count", len(message.Photo))
+
+	if len(message.Photo) == 0 {
+		h.logger.Warn("Photo message with no photos",
+			"user_id", user.TelegramID,
+			"message_id", message.MessageID)
+		return
+	}
+
+	// Get the largest photo (best quality)
+	var largestPhoto *tgbotapi.PhotoSize
+	for i := range message.Photo {
+		photo := &message.Photo[i]
+		if largestPhoto == nil || photo.FileSize > largestPhoto.FileSize {
+			largestPhoto = photo
+		}
+	}
+
+	h.logger.Info("Selected photo for receipt processing",
+		"user_id", user.TelegramID,
+		"file_id", largestPhoto.FileID,
+		"width", largestPhoto.Width,
+		"height", largestPhoto.Height,
+		"file_size", largestPhoto.FileSize)
+
+	// Use the receipts callback handler for photo processing
+	err := h.receiptsCallbackHandler.HandleReceiptPhoto(ctx, message.Chat.ID, message.MessageID, user.User, largestPhoto)
+	if err != nil {
+		h.logger.Error("Failed to handle receipt photo",
+			"error", err,
+			"user_id", user.TelegramID,
+			"file_id", largestPhoto.FileID)
+	}
+}
+
+// HandleDocumentMessage processes document messages for receipt upload
+func (h *CoreMessageHandler) HandleDocumentMessage(ctx context.Context, message *tgbotapi.Message, user *InternalUser) {
+	if !user.IsAuthorized {
+		h.logger.Debug("Ignoring document message from unauthorized user",
+			"user_id", user.TelegramID)
+		return
+	}
+
+	if message.Document == nil {
+		h.logger.Warn("Document message with no document",
+			"user_id", user.TelegramID,
+			"message_id", message.MessageID)
+		return
+	}
+
+	h.logger.Info("Processing document message",
+		"user_id", user.TelegramID,
+		"chat_id", message.Chat.ID,
+		"document_file_id", message.Document.FileID,
+		"document_size", message.Document.FileSize,
+		"mime_type", message.Document.MimeType,
+		"file_name", message.Document.FileName)
+
+	// Use the receipts callback handler for document processing
+	err := h.receiptsCallbackHandler.HandleReceiptDocument(ctx, message.Chat.ID, message.MessageID, user.User, message.Document)
+	if err != nil {
+		h.logger.Error("Failed to handle receipt document",
+			"error", err,
+			"user_id", user.TelegramID,
+			"file_id", message.Document.FileID)
 	}
 }
 

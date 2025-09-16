@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
 	"github.com/google/uuid"
@@ -60,11 +62,34 @@ func NewAzureProvider(config AzureConfig) (*AzureProvider, error) {
 		config.UseHTTPS = true // Default to HTTPS
 	}
 
-	return &AzureProvider{
+	provider := &AzureProvider{
 		client:        client,
 		containerName: config.ContainerName,
 		config:        config,
-	}, nil
+	}
+
+	// Ensure container exists
+	ctx := context.Background()
+	containerClient := client.ServiceClient().NewContainerClient(config.ContainerName)
+	_, err = containerClient.Create(ctx, &container.CreateOptions{
+		Metadata: map[string]*string{
+			"created_by": to.Ptr("PocketPal"),
+			"purpose":    to.Ptr("file_storage"),
+		},
+	})
+	if err != nil {
+		// Container might already exist, which is fine
+		// We only log this as info, not error
+		if !strings.Contains(err.Error(), "ContainerAlreadyExists") {
+			return nil, &CloudError{
+				Code:    "CONTAINER_CREATE_FAILED",
+				Message: "failed to create container in Azure Blob Storage",
+				Cause:   err,
+			}
+		}
+	}
+
+	return provider, nil
 }
 
 // UploadFile uploads a file to Azure Blob Storage
@@ -77,16 +102,43 @@ func (p *AzureProvider) UploadFile(ctx context.Context, req *UploadRequest) (*Up
 	}
 
 	// Generate file ID if not provided
-	fileID := req.FileID
-	if fileID == "" {
-		fileID = uuid.New().String()
-		// Add file extension if available
-		if req.FileName != "" && strings.Contains(req.FileName, ".") {
-			parts := strings.Split(req.FileName, ".")
-			if len(parts) > 1 {
-				extension := parts[len(parts)-1]
-				fileID = fileID + "." + extension
+	fileName := req.FileName
+	if fileName == "" {
+		fileName = "file"
+	}
+
+	// Construct full path with folder structure
+	var fullPath string
+	if req.FolderPath != "" {
+		// Ensure folder path doesn't start or end with /
+		folderPath := strings.Trim(req.FolderPath, "/")
+		if req.FileID != "" {
+			fullPath = folderPath + "/" + req.FileID
+		} else {
+			// Generate unique filename with UUID
+			fileID := uuid.New().String()
+			if fileName != "" && strings.Contains(fileName, ".") {
+				parts := strings.Split(fileName, ".")
+				if len(parts) > 1 {
+					extension := parts[len(parts)-1]
+					fileID = fileID + "." + extension
+				}
 			}
+			fullPath = folderPath + "/" + fileID
+		}
+	} else {
+		if req.FileID != "" {
+			fullPath = req.FileID
+		} else {
+			fileID := uuid.New().String()
+			if fileName != "" && strings.Contains(fileName, ".") {
+				parts := strings.Split(fileName, ".")
+				if len(parts) > 1 {
+					extension := parts[len(parts)-1]
+					fileID = fileID + "." + extension
+				}
+			}
+			fullPath = fileID
 		}
 	}
 
@@ -94,6 +146,9 @@ func (p *AzureProvider) UploadFile(ctx context.Context, req *UploadRequest) (*Up
 	metadata := make(map[string]*string)
 	if req.FileName != "" {
 		metadata["filename"] = to.Ptr(req.FileName)
+	}
+	if req.FolderPath != "" {
+		metadata["folder_path"] = to.Ptr(req.FolderPath)
 	}
 	for k, v := range req.Metadata {
 		metadata[k] = to.Ptr(v)
@@ -112,13 +167,13 @@ func (p *AzureProvider) UploadFile(ctx context.Context, req *UploadRequest) (*Up
 	}
 
 	if req.ContentType != "" {
-		uploadOptions.HTTPHeaders = &azblob.HTTPHeaders{
+		uploadOptions.HTTPHeaders = &blob.HTTPHeaders{
 			BlobContentType: to.Ptr(req.ContentType),
 		}
 	}
 
 	// Upload the file
-	uploadResponse, err := p.client.UploadStream(ctx, p.containerName, fileID, req.Content, uploadOptions)
+	uploadResponse, err := p.client.UploadStream(ctx, p.containerName, fullPath, req.Content, uploadOptions)
 	if err != nil {
 		return nil, &CloudError{
 			Code:    "UPLOAD_FAILED",
@@ -128,10 +183,10 @@ func (p *AzureProvider) UploadFile(ctx context.Context, req *UploadRequest) (*Up
 	}
 
 	// Generate public URL
-	publicURL := p.generatePublicURL(fileID)
+	publicURL := p.generatePublicURL(fullPath)
 
 	response := &UploadResponse{
-		FileID:      fileID,
+		FileID:      fullPath,
 		PublicURL:   publicURL,
 		ContentType: req.ContentType,
 		UploadedAt:  time.Now().UTC(),
@@ -166,7 +221,8 @@ func (p *AzureProvider) GetPresignedURL(ctx context.Context, fileID string, expi
 	}
 
 	// Check if file exists
-	_, err := p.client.NewBlobClient(p.containerName, fileID).GetProperties(ctx, nil)
+	blobClient := p.client.ServiceClient().NewContainerClient(p.containerName).NewBlobClient(fileID)
+	_, err := blobClient.GetProperties(ctx, nil)
 	if err != nil {
 		return "", &CloudError{
 			Code:    "FILE_NOT_FOUND",
@@ -208,7 +264,7 @@ func (p *AzureProvider) DeleteFile(ctx context.Context, fileID string) error {
 		return ErrInvalidFileID
 	}
 
-	blobClient := p.client.NewBlobClient(p.containerName, fileID)
+	blobClient := p.client.ServiceClient().NewContainerClient(p.containerName).NewBlobClient(fileID)
 	_, err := blobClient.Delete(ctx, nil)
 	if err != nil {
 		return &CloudError{
@@ -234,8 +290,26 @@ func (p *AzureProvider) ListFiles(ctx context.Context, req *ListFilesRequest) (*
 		},
 	}
 
+	// Set prefix based on folder path or explicit prefix
+	var prefix string
+	if req.FolderPath != "" {
+		folderPath := strings.Trim(req.FolderPath, "/")
+		if req.Recursive {
+			prefix = folderPath + "/"
+		} else {
+			prefix = folderPath + "/"
+		}
+	}
 	if req.Prefix != "" {
-		listOptions.Prefix = to.Ptr(req.Prefix)
+		if prefix != "" {
+			prefix = prefix + req.Prefix
+		} else {
+			prefix = req.Prefix
+		}
+	}
+
+	if prefix != "" {
+		listOptions.Prefix = to.Ptr(prefix)
 	}
 
 	if req.MaxResults > 0 {
@@ -269,12 +343,19 @@ func (p *AzureProvider) ListFiles(ctx context.Context, req *ListFilesRequest) (*
 				continue
 			}
 
+			// Parse folder path and filename from blob name
+			blobName := *blob.Name
+			folderPath, fileName := p.parseBlobPath(blobName)
+
 			fileInfo := &FileInfo{
-				FileID:    *blob.Name,
-				Size:      0,
-				PublicURL: p.generatePublicURL(*blob.Name),
-				Metadata:  make(map[string]string),
-				Tags:      make(map[string]string),
+				FileID:       blobName,
+				FolderPath:   folderPath,
+				FileName:     fileName,
+				RelativePath: blobName,
+				Size:         0,
+				PublicURL:    p.generatePublicURL(blobName),
+				Metadata:     make(map[string]string),
+				Tags:         make(map[string]string),
 			}
 
 			// Set file size
@@ -301,7 +382,7 @@ func (p *AzureProvider) ListFiles(ctx context.Context, req *ListFilesRequest) (*
 			if blob.Metadata != nil {
 				for k, v := range blob.Metadata {
 					if v != nil {
-						if k == "filename" {
+						if k == "filename" && fileInfo.FileName == "" {
 							fileInfo.FileName = *v
 						}
 						fileInfo.Metadata[k] = *v
@@ -337,7 +418,7 @@ func (p *AzureProvider) GetFileInfo(ctx context.Context, fileID string) (*FileIn
 		return nil, ErrInvalidFileID
 	}
 
-	blobClient := p.client.NewBlobClient(p.containerName, fileID)
+	blobClient := p.client.ServiceClient().NewContainerClient(p.containerName).NewBlobClient(fileID)
 
 	// Get blob properties
 	props, err := blobClient.GetProperties(ctx, nil)
@@ -349,12 +430,18 @@ func (p *AzureProvider) GetFileInfo(ctx context.Context, fileID string) (*FileIn
 		}
 	}
 
+	// Parse folder path and filename from fileID
+	folderPath, fileName := p.parseBlobPath(fileID)
+
 	fileInfo := &FileInfo{
-		FileID:    fileID,
-		Size:      *props.ContentLength,
-		PublicURL: p.generatePublicURL(fileID),
-		Metadata:  make(map[string]string),
-		Tags:      make(map[string]string),
+		FileID:       fileID,
+		FolderPath:   folderPath,
+		FileName:     fileName,
+		RelativePath: fileID,
+		Size:         *props.ContentLength,
+		PublicURL:    p.generatePublicURL(fileID),
+		Metadata:     make(map[string]string),
+		Tags:         make(map[string]string),
 	}
 
 	// Set content type
@@ -375,7 +462,7 @@ func (p *AzureProvider) GetFileInfo(ctx context.Context, fileID string) (*FileIn
 	// Convert metadata
 	for k, v := range props.Metadata {
 		if v != nil {
-			if k == "filename" {
+			if k == "filename" && fileInfo.FileName == "" {
 				fileInfo.FileName = *v
 			}
 			fileInfo.Metadata[k] = *v
@@ -408,6 +495,249 @@ func (p *AzureProvider) generatePublicURL(fileID string) string {
 
 	return fmt.Sprintf("%s://%s.blob.core.windows.net/%s/%s",
 		protocol, p.config.StorageAccountName, p.containerName, url.QueryEscape(fileID))
+}
+
+// CreateFolder creates a virtual folder by creating a marker blob
+func (p *AzureProvider) CreateFolder(ctx context.Context, folderPath string) error {
+	if folderPath == "" {
+		return &CloudError{
+			Code:    "INVALID_FOLDER_PATH",
+			Message: "folder path cannot be empty",
+		}
+	}
+
+	// Normalize folder path
+	folderPath = strings.Trim(folderPath, "/") + "/"
+
+	// Create a marker blob to represent the folder
+	markerBlobName := folderPath + ".folder_marker"
+
+	metadata := map[string]*string{
+		"folder_marker": to.Ptr("true"),
+		"created_at":    to.Ptr(time.Now().UTC().Format(time.RFC3339)),
+	}
+
+	uploadOptions := &azblob.UploadStreamOptions{
+		Metadata: metadata,
+	}
+
+	// Upload empty content as folder marker
+	emptyContent := strings.NewReader("")
+	_, err := p.client.UploadStream(ctx, p.containerName, markerBlobName, emptyContent, uploadOptions)
+	if err != nil {
+		return &CloudError{
+			Code:    "FOLDER_CREATE_FAILED",
+			Message: "failed to create folder in Azure Blob Storage",
+			Cause:   err,
+		}
+	}
+
+	return nil
+}
+
+// ListFolders lists folders within a path
+func (p *AzureProvider) ListFolders(ctx context.Context, parentPath string) ([]*FolderInfo, error) {
+	// Normalize parent path
+	if parentPath != "" {
+		parentPath = strings.Trim(parentPath, "/") + "/"
+	}
+
+	listOptions := &container.ListBlobsFlatOptions{
+		Include: container.ListBlobsInclude{
+			Metadata: true,
+		},
+		Prefix: to.Ptr(parentPath),
+	}
+
+	containerClient := p.client.ServiceClient().NewContainerClient(p.containerName)
+	pager := containerClient.NewListBlobsFlatPager(listOptions)
+
+	folderMap := make(map[string]*FolderInfo)
+
+	if pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, &CloudError{
+				Code:    "LIST_FOLDERS_FAILED",
+				Message: "failed to list folders from Azure Blob Storage",
+				Cause:   err,
+			}
+		}
+
+		for _, blob := range page.Segment.BlobItems {
+			if blob.Name == nil {
+				continue
+			}
+
+			blobName := *blob.Name
+
+			// Skip if this blob is not in a deeper folder
+			if !strings.HasPrefix(blobName, parentPath) {
+				continue
+			}
+
+			relativePath := strings.TrimPrefix(blobName, parentPath)
+
+			// Find the immediate folder
+			parts := strings.Split(relativePath, "/")
+			if len(parts) > 1 {
+				folderName := parts[0]
+				fullFolderPath := parentPath + folderName
+
+				// Initialize or update folder info
+				if folderInfo, exists := folderMap[fullFolderPath]; exists {
+					folderInfo.FileCount++
+					if blob.Properties != nil && blob.Properties.ContentLength != nil {
+						folderInfo.TotalSize += *blob.Properties.ContentLength
+					}
+					if blob.Properties != nil && blob.Properties.LastModified != nil {
+						if blob.Properties.LastModified.After(folderInfo.LastModified) {
+							folderInfo.LastModified = *blob.Properties.LastModified
+						}
+					}
+				} else {
+					folderInfo := &FolderInfo{
+						FolderPath:   fullFolderPath,
+						FolderName:   folderName,
+						ParentPath:   strings.TrimSuffix(parentPath, "/"),
+						FileCount:    1,
+						TotalSize:    0,
+						CreatedAt:    time.Now().UTC(),
+						LastModified: time.Now().UTC(),
+						Metadata:     make(map[string]string),
+					}
+
+					if blob.Properties != nil && blob.Properties.ContentLength != nil {
+						folderInfo.TotalSize = *blob.Properties.ContentLength
+					}
+					if blob.Properties != nil && blob.Properties.LastModified != nil {
+						folderInfo.LastModified = *blob.Properties.LastModified
+						folderInfo.CreatedAt = *blob.Properties.LastModified
+					}
+
+					folderMap[fullFolderPath] = folderInfo
+				}
+			}
+		}
+	}
+
+	// Convert map to slice and sort
+	folders := make([]*FolderInfo, 0, len(folderMap))
+	for _, folder := range folderMap {
+		folders = append(folders, folder)
+	}
+
+	// Sort folders by name
+	sort.Slice(folders, func(i, j int) bool {
+		return folders[i].FolderName < folders[j].FolderName
+	})
+
+	return folders, nil
+}
+
+// DeleteFolder deletes a folder and all its contents
+func (p *AzureProvider) DeleteFolder(ctx context.Context, folderPath string) error {
+	if folderPath == "" {
+		return &CloudError{
+			Code:    "INVALID_FOLDER_PATH",
+			Message: "folder path cannot be empty",
+		}
+	}
+
+	// Normalize folder path
+	folderPath = strings.Trim(folderPath, "/") + "/"
+
+	// List all blobs in the folder
+	listOptions := &container.ListBlobsFlatOptions{
+		Prefix: to.Ptr(folderPath),
+	}
+
+	containerClient := p.client.ServiceClient().NewContainerClient(p.containerName)
+	pager := containerClient.NewListBlobsFlatPager(listOptions)
+
+	var deletionErrors []string
+
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return &CloudError{
+				Code:    "DELETE_FOLDER_FAILED",
+				Message: "failed to list folder contents for deletion",
+				Cause:   err,
+			}
+		}
+
+		// Delete each blob in the folder
+		for _, blob := range page.Segment.BlobItems {
+			if blob.Name == nil {
+				continue
+			}
+
+			blobClient := containerClient.NewBlobClient(*blob.Name)
+			_, err := blobClient.Delete(ctx, nil)
+			if err != nil {
+				deletionErrors = append(deletionErrors, fmt.Sprintf("failed to delete %s: %v", *blob.Name, err))
+			}
+		}
+	}
+
+	if len(deletionErrors) > 0 {
+		return &CloudError{
+			Code:    "DELETE_FOLDER_PARTIAL_FAILURE",
+			Message: "some files in folder could not be deleted: " + strings.Join(deletionErrors, "; "),
+		}
+	}
+
+	return nil
+}
+
+// DownloadFile downloads file content directly from Azure Blob Storage
+func (p *AzureProvider) DownloadFile(ctx context.Context, fileID string) ([]byte, error) {
+	if fileID == "" {
+		return nil, ErrInvalidFileID
+	}
+
+	// Get blob client
+	blobClient := p.client.ServiceClient().NewContainerClient(p.containerName).NewBlobClient(fileID)
+
+	// Download blob content
+	response, err := blobClient.DownloadStream(ctx, nil)
+	if err != nil {
+		return nil, &CloudError{
+			Code:    "DOWNLOAD_FAILED",
+			Message: "failed to download file from Azure Blob Storage",
+			Cause:   err,
+		}
+	}
+	defer func() {
+		if response.Body != nil {
+			response.Body.Close()
+		}
+	}()
+
+	// Read all content
+	data, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, &CloudError{
+			Code:    "READ_FAILED",
+			Message: "failed to read file content",
+			Cause:   err,
+		}
+	}
+
+	return data, nil
+}
+
+// parseBlobPath splits a blob name into folder path and filename
+func (p *AzureProvider) parseBlobPath(blobName string) (folderPath, fileName string) {
+	if !strings.Contains(blobName, "/") {
+		return "", blobName
+	}
+
+	lastSlash := strings.LastIndex(blobName, "/")
+	folderPath = blobName[:lastSlash]
+	fileName = blobName[lastSlash+1:]
+	return folderPath, fileName
 }
 
 // getSharedKeyCredential returns the shared key credential for SAS generation

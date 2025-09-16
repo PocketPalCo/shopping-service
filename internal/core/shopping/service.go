@@ -26,6 +26,7 @@ type ShoppingList struct {
 	OwnerID     uuid.UUID  `json:"owner_id" db:"owner_id"`
 	FamilyID    *uuid.UUID `json:"family_id" db:"family_id"` // Optional family association
 	IsShared    bool       `json:"is_shared" db:"is_shared"`
+	IsArchived  bool       `json:"is_archived" db:"is_archived"`
 	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
 }
@@ -95,9 +96,9 @@ func (s *Service) CreateShoppingList(ctx context.Context, req CreateShoppingList
 	defer span.End()
 
 	query := `
-		INSERT INTO shopping_lists (name, description, owner_id, family_id, is_shared)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, name, description, owner_id, family_id, is_shared, created_at, updated_at`
+		INSERT INTO shopping_lists (name, description, owner_id, family_id, is_shared, is_archived)
+		VALUES ($1, $2, $3, $4, $5, false)
+		RETURNING id, name, description, owner_id, family_id, is_shared, is_archived, created_at, updated_at`
 
 	var list ShoppingList
 	err := s.db.QueryRow(ctx, query,
@@ -113,6 +114,7 @@ func (s *Service) CreateShoppingList(ctx context.Context, req CreateShoppingList
 		&list.OwnerID,
 		&list.FamilyID,
 		&list.IsShared,
+		&list.IsArchived,
 		&list.CreatedAt,
 		&list.UpdatedAt,
 	)
@@ -152,11 +154,12 @@ func (s *Service) GetUserShoppingLists(ctx context.Context, userID uuid.UUID) ([
 	defer span.End()
 
 	query := `
-		SELECT DISTINCT sl.id, sl.name, sl.description, sl.owner_id, sl.family_id, sl.is_shared, sl.created_at, sl.updated_at
+		SELECT DISTINCT sl.id, sl.name, sl.description, sl.owner_id, sl.family_id, sl.is_shared, sl.is_archived, sl.created_at, sl.updated_at
 		FROM shopping_lists sl
 		LEFT JOIN family_members fm ON sl.family_id = fm.family_id
-		WHERE (sl.owner_id = $1)
-		   OR (sl.family_id IS NOT NULL AND fm.user_id = $1)
+		WHERE ((sl.owner_id = $1)
+		   OR (sl.family_id IS NOT NULL AND fm.user_id = $1))
+		   AND sl.is_archived = false
 		ORDER BY sl.created_at DESC
 	`
 
@@ -177,6 +180,7 @@ func (s *Service) GetUserShoppingLists(ctx context.Context, userID uuid.UUID) ([
 			&list.OwnerID,
 			&list.FamilyID,
 			&list.IsShared,
+			&list.IsArchived,
 			&list.CreatedAt,
 			&list.UpdatedAt,
 		)
@@ -223,13 +227,14 @@ func (s *Service) GetUserShoppingListsWithFamilies(ctx context.Context, userID u
 
 	// Get shopping lists with family names
 	query := `
-		SELECT DISTINCT sl.id, sl.name, sl.description, sl.owner_id, sl.family_id, sl.is_shared,
+		SELECT DISTINCT sl.id, sl.name, sl.description, sl.owner_id, sl.family_id, sl.is_shared, sl.is_archived,
 		       sl.created_at, sl.updated_at, f.name as family_name
 		FROM shopping_lists sl
 		LEFT JOIN family_members fm ON sl.family_id = fm.family_id
 		LEFT JOIN families f ON sl.family_id = f.id
-		WHERE (sl.owner_id = $1)
-		   OR (sl.family_id IS NOT NULL AND fm.user_id = $1)
+		WHERE ((sl.owner_id = $1)
+		   OR (sl.family_id IS NOT NULL AND fm.user_id = $1))
+		   AND sl.is_archived = false
 		ORDER BY sl.created_at DESC
 	`
 
@@ -252,6 +257,7 @@ func (s *Service) GetUserShoppingListsWithFamilies(ctx context.Context, userID u
 			&list.OwnerID,
 			&list.FamilyID,
 			&list.IsShared,
+			&list.IsArchived,
 			&list.CreatedAt,
 			&list.UpdatedAt,
 			&familyName,
@@ -281,8 +287,8 @@ func (s *Service) GetShoppingListByID(ctx context.Context, listID uuid.UUID) (*S
 	defer span.End()
 
 	query := `
-		SELECT id, name, description, owner_id, family_id, is_shared, created_at, updated_at
-		FROM shopping_lists 
+		SELECT id, name, description, owner_id, family_id, is_shared, is_archived, created_at, updated_at
+		FROM shopping_lists
 		WHERE id = $1
 	`
 
@@ -294,6 +300,7 @@ func (s *Service) GetShoppingListByID(ctx context.Context, listID uuid.UUID) (*S
 		&list.OwnerID,
 		&list.FamilyID,
 		&list.IsShared,
+		&list.IsArchived,
 		&list.CreatedAt,
 		&list.UpdatedAt,
 	)
@@ -696,15 +703,72 @@ func (s *Service) DeleteShoppingList(ctx context.Context, listID uuid.UUID) erro
 	return nil
 }
 
+// ArchiveShoppingList marks a shopping list as archived
+func (s *Service) ArchiveShoppingList(ctx context.Context, listID uuid.UUID) error {
+	ctx, span := tracer.Start(ctx, "shopping.ArchiveShoppingList")
+	defer span.End()
+
+	query := `
+		UPDATE shopping_lists
+		SET is_archived = true, updated_at = NOW()
+		WHERE id = $1
+	`
+
+	result, err := s.db.Exec(ctx, query, listID)
+	if err != nil {
+		span.RecordError(err)
+		// Record archive error metric
+		if telemetry.ShoppingListOperations != nil {
+			telemetry.ShoppingListOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "archive"),
+					attribute.String("status", "error"),
+				),
+			)
+		}
+		return fmt.Errorf("failed to archive shopping list: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		// Record not found metric
+		if telemetry.ShoppingListOperations != nil {
+			telemetry.ShoppingListOperations.Add(ctx, 1,
+				api.WithAttributes(
+					attribute.String("operation", "archive"),
+					attribute.String("status", "not_found"),
+				),
+			)
+		}
+		return fmt.Errorf("shopping list not found")
+	}
+
+	// Record success metric
+	if telemetry.ShoppingListOperations != nil {
+		telemetry.ShoppingListOperations.Add(ctx, 1,
+			api.WithAttributes(
+				attribute.String("operation", "archive"),
+				attribute.String("status", "success"),
+			),
+		)
+	}
+
+	// Update active lists counter
+	if telemetry.ShoppingListsActive != nil {
+		telemetry.ShoppingListsActive.Add(ctx, -1)
+	}
+
+	return nil
+}
+
 // GetFamilyShoppingLists returns all shopping lists for a specific family
 func (s *Service) GetFamilyShoppingLists(ctx context.Context, familyID uuid.UUID) ([]*ShoppingList, error) {
 	ctx, span := tracer.Start(ctx, "shopping.GetFamilyShoppingLists")
 	defer span.End()
 
 	query := `
-		SELECT id, name, description, owner_id, family_id, is_shared, created_at, updated_at
-		FROM shopping_lists 
-		WHERE family_id = $1
+		SELECT id, name, description, owner_id, family_id, is_shared, is_archived, created_at, updated_at
+		FROM shopping_lists
+		WHERE family_id = $1 AND is_archived = false
 		ORDER BY created_at DESC
 	`
 
@@ -725,6 +789,7 @@ func (s *Service) GetFamilyShoppingLists(ctx context.Context, familyID uuid.UUID
 			&list.OwnerID,
 			&list.FamilyID,
 			&list.IsShared,
+			&list.IsArchived,
 			&list.CreatedAt,
 			&list.UpdatedAt,
 		)

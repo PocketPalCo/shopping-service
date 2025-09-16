@@ -1,0 +1,11 @@
+Translate receipt items {items_json} to {target_locale}.
+
+Return JSON:
+{
+  "detected_language": "xx",
+  "target_language": "{target_locale}",
+  "translations": [{"original_text": "item", "translated_text": "item", "detected_language": "xx", "target_language": "{target_locale}", "confidence": 0.9}],
+  "confidence": 0.9
+}
+
+Rules: Detect language from majority. If same language, return as-is. Maintain grocery context.

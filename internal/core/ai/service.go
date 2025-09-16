@@ -2,11 +2,15 @@ package ai
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/PocketPalCo/shopping-service/config"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel"
@@ -69,28 +73,84 @@ type ProductListDetectionResult struct {
 	SampleItems        []string `json:"sample_items"`
 }
 
+type TranslationResult struct {
+	TranslatedText string  `json:"translated_text"`
+	Confidence     float64 `json:"confidence"`
+}
+
+type ReceiptItemTranslation struct {
+	OriginalText     string  `json:"original_text"`
+	TranslatedText   string  `json:"translated_text"`
+	DetectedLanguage string  `json:"detected_language"`
+	TargetLanguage   string  `json:"target_language"`
+	Confidence       float64 `json:"confidence"`
+}
+
+type BatchTranslationRequest struct {
+	Items        []string `json:"items"`
+	TargetLocale string   `json:"target_locale"`
+}
+
+type BatchTranslationResult struct {
+	DetectedLanguage string                   `json:"detected_language"`
+	TargetLanguage   string                   `json:"target_language"`
+	Translations     []ReceiptItemTranslation `json:"translations"`
+	Confidence       float64                  `json:"confidence"`
+}
+
+type TranslationCache struct {
+	ID               uuid.UUID `json:"id" db:"id"`
+	OriginalItem     string    `json:"original_item" db:"original_item"`
+	ItemHash         string    `json:"item_hash" db:"item_hash"`
+	TargetLocale     string    `json:"target_locale" db:"target_locale"`
+	AIResponse       string    `json:"ai_response" db:"ai_response"` // JSONB as string
+	DetectedLanguage *string   `json:"detected_language" db:"detected_language"`
+	Confidence       *float64  `json:"confidence" db:"confidence"`
+	CreatedAt        time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
+}
+
 type OpenAIClient interface {
 	ParseItem(ctx context.Context, rawText, languageCode string) (*ParsedResult, error)
 	ParseItems(ctx context.Context, rawText, languageCode string) ([]*ParsedResult, error)
 	DetectLanguage(ctx context.Context, text string) (string, error)
 	DetectProductList(ctx context.Context, text string) (*ProductListDetectionResult, error)
+	Translate(ctx context.Context, originalText, originalLanguage, targetLanguage string) (*TranslationResult, error)
+	BatchTranslateReceiptItems(ctx context.Context, req *BatchTranslationRequest) (*BatchTranslationResult, error)
 }
 
 type Service struct {
-	db           *pgxpool.Pool
-	openaiClient OpenAIClient
-	logger       *slog.Logger
+	db                   *pgxpool.Pool
+	openaiClient         OpenAIClient
+	DocumentIntelligence *DocumentIntelligenceService
+	logger               *slog.Logger
 }
 
-func NewService(db *pgxpool.Pool, openaiClient OpenAIClient, logger *slog.Logger) *Service {
-	return &Service{
-		db:           db,
-		openaiClient: openaiClient,
-		logger:       logger,
+func NewService(db *pgxpool.Pool, openaiClient OpenAIClient, cfg config.Config, logger *slog.Logger) (*Service, error) {
+	// Initialize Document Intelligence service
+	docIntelConfig := cfg.GetDocumentIntelligenceConfig()
+	docIntelService := NewDocumentIntelligenceService(
+		docIntelConfig.Endpoint,
+		docIntelConfig.APIKey,
+		docIntelConfig.APIVersion,
+		docIntelConfig.Model,
+	)
+
+	// Validate configuration if endpoints are provided
+	if docIntelConfig.Endpoint != "" || docIntelConfig.APIKey != "" {
+		if err := docIntelService.ValidateConfiguration(); err != nil {
+			logger.Warn("Document Intelligence service not configured properly", "error", err)
+		}
 	}
+
+	return &Service{
+		db:                   db,
+		openaiClient:         openaiClient,
+		DocumentIntelligence: docIntelService,
+		logger:               logger,
+	}, nil
 }
 
-// ParseAndStoreItem processes raw item text through AI and stores all data for training
 func (s *Service) ParseAndStoreItem(ctx context.Context, rawText, languageCode string, userID uuid.UUID) (*ParsedResult, error) {
 	ctx, span := tracer.Start(ctx, "ai.ParseAndStoreItem")
 	defer span.End()
@@ -131,7 +191,6 @@ func (s *Service) ParseAndStoreItem(ctx context.Context, rawText, languageCode s
 	return parsedResult, nil
 }
 
-// GetOrCreateParsedItem gets existing parsed result or creates new one
 func (s *Service) GetOrCreateParsedItem(ctx context.Context, rawText, languageCode string, userID uuid.UUID) (*ParsedResult, error) {
 	ctx, span := tracer.Start(ctx, "ai.GetOrCreateParsedItem")
 	defer span.End()
@@ -293,7 +352,6 @@ func (s *Service) findExistingParsedItem(ctx context.Context, rawText, languageC
 	return &result, nil
 }
 
-// extractQuantity extracts quantity information from raw text
 func (s *Service) extractQuantity(rawText string) (itemText string, quantity *string) {
 	text := strings.TrimSpace(rawText)
 
@@ -327,7 +385,6 @@ func (s *Service) extractQuantity(rawText string) (itemText string, quantity *st
 	return text, nil
 }
 
-// ParseAndStoreItems processes raw text through AI and stores training data in database
 func (s *Service) ParseAndStoreItems(ctx context.Context, rawText, languageCode string, userID uuid.UUID) ([]*ParsedResult, error) {
 	ctx, span := tracer.Start(ctx, "ai.ParseAndStoreItems")
 	defer span.End()
@@ -471,7 +528,6 @@ func (s *Service) ParseAndStoreItems(ctx context.Context, rawText, languageCode 
 	return results, nil
 }
 
-// storeItemMapping creates a mapping between an original and parsed item
 func (s *Service) storeItemMapping(ctx context.Context, originalItemID, parsedItemID uuid.UUID, mappingMethod string, confidence float64, userID uuid.UUID) error {
 	query := `
 		INSERT INTO item_mappings (original_item_id, parsed_item_id, mapping_method, is_validated, created_at, updated_at)
@@ -495,7 +551,6 @@ func (s *Service) storeItemMapping(ctx context.Context, originalItemID, parsedIt
 	return nil
 }
 
-// containsDigit checks if a string contains any digit
 func containsDigit(s string) bool {
 	for _, char := range s {
 		if char >= '0' && char <= '9' {
@@ -505,7 +560,6 @@ func containsDigit(s string) bool {
 	return false
 }
 
-// DetectProductList uses AI to detect if the given text contains a product/shopping list
 func (s *Service) DetectProductList(ctx context.Context, text string) (*ProductListDetectionResult, error) {
 	ctx, span := tracer.Start(ctx, "ai.DetectProductList")
 	defer span.End()
@@ -526,7 +580,185 @@ func (s *Service) DetectProductList(ctx context.Context, text string) (*ProductL
 	return result, nil
 }
 
-// DetectLanguage detects the language of the given text using AI
 func (s *Service) DetectLanguage(ctx context.Context, text string) (string, error) {
 	return s.openaiClient.DetectLanguage(ctx, text)
+}
+
+func (s *Service) Translate(ctx context.Context, originalText, originalLanguage, targetLanguage string) (*TranslationResult, error) {
+	return s.openaiClient.Translate(ctx, originalText, originalLanguage, targetLanguage)
+}
+
+func (s *Service) BatchTranslateReceiptItems(ctx context.Context, req *BatchTranslationRequest) (*BatchTranslationResult, error) {
+	ctx, span := tracer.Start(ctx, "ai.BatchTranslateReceiptItems")
+	defer span.End()
+
+	s.logger.Info("Starting batch translation of receipt items with cache lookup",
+		"items_count", len(req.Items),
+		"target_locale", req.TargetLocale)
+
+	// Step 1: Check cache for existing translations
+	cachedResults, uncachedItems, err := s.getCachedTranslations(ctx, req.Items, req.TargetLocale)
+	if err != nil {
+		s.logger.Warn("Failed to lookup translation cache, proceeding without cache",
+			"error", err)
+		uncachedItems = req.Items
+	}
+
+	// Step 2: Process uncached items with AI if any
+	var aiResult *BatchTranslationResult
+	if len(uncachedItems) > 0 {
+		uncachedReq := &BatchTranslationRequest{
+			Items:        uncachedItems,
+			TargetLocale: req.TargetLocale,
+		}
+
+		aiResult, err = s.openaiClient.BatchTranslateReceiptItems(ctx, uncachedReq)
+		if err != nil {
+			span.RecordError(err)
+			s.logger.Error("Failed to batch translate receipt items with AI",
+				"error", err,
+				"items_count", len(uncachedItems),
+				"target_locale", req.TargetLocale)
+			return nil, fmt.Errorf("failed to batch translate receipt items: %w", err)
+		}
+
+		// Step 3: Store AI results in cache
+		for _, item := range uncachedItems {
+			if err := s.storeCachedTranslation(ctx, item, req.TargetLocale, aiResult); err != nil {
+				s.logger.Warn("Failed to store translation in cache", "item", item, "error", err)
+			}
+		}
+	}
+
+	// Step 4: Combine cached and AI results
+	finalResult := &BatchTranslationResult{
+		TargetLanguage: req.TargetLocale,
+		Translations:   make([]ReceiptItemTranslation, 0),
+	}
+
+	// Add cached translations
+	for _, cachedResult := range cachedResults {
+		finalResult.Translations = append(finalResult.Translations, cachedResult.Translations...)
+		if finalResult.DetectedLanguage == "" {
+			finalResult.DetectedLanguage = cachedResult.DetectedLanguage
+		}
+		finalResult.Confidence = cachedResult.Confidence // Use last confidence
+	}
+
+	// Add AI translations
+	if aiResult != nil {
+		finalResult.Translations = append(finalResult.Translations, aiResult.Translations...)
+		if finalResult.DetectedLanguage == "" {
+			finalResult.DetectedLanguage = aiResult.DetectedLanguage
+		}
+		finalResult.Confidence = aiResult.Confidence // Use AI confidence if available
+	}
+
+	s.logger.Info("Successfully completed batch translation with cache optimization",
+		"total_items", len(req.Items),
+		"cached_items", len(cachedResults),
+		"ai_processed_items", len(uncachedItems),
+		"target_locale", req.TargetLocale,
+		"detected_language", finalResult.DetectedLanguage,
+		"final_translations_count", len(finalResult.Translations),
+		"confidence", finalResult.Confidence)
+
+	return finalResult, nil
+}
+
+// normalizeItem normalizes an item name for consistent cache lookups
+func (s *Service) normalizeItem(item string) string {
+	// Normalize to lowercase and trim spaces for consistent hashing
+	return strings.TrimSpace(strings.ToLower(item))
+}
+
+// hashItem creates a SHA256 hash of the normalized item name
+func (s *Service) hashItem(item string) string {
+	normalized := s.normalizeItem(item)
+	hash := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(hash[:])
+}
+
+// getCachedTranslations looks up cached translations for items
+func (s *Service) getCachedTranslations(ctx context.Context, items []string, targetLocale string) (map[string]*BatchTranslationResult, []string, error) {
+	cached := make(map[string]*BatchTranslationResult)
+	var uncachedItems []string
+
+	for _, item := range items {
+		itemHash := s.hashItem(item)
+
+		var cache TranslationCache
+		query := `SELECT id, original_item, item_hash, target_locale, ai_response, detected_language, confidence, created_at, updated_at
+				  FROM translation_cache
+				  WHERE item_hash = $1 AND target_locale = $2`
+
+		err := s.db.QueryRow(ctx, query, itemHash, targetLocale).Scan(
+			&cache.ID, &cache.OriginalItem, &cache.ItemHash, &cache.TargetLocale,
+			&cache.AIResponse, &cache.DetectedLanguage, &cache.Confidence,
+			&cache.CreatedAt, &cache.UpdatedAt)
+
+		if err != nil {
+			// Not found in cache, add to uncached list
+			uncachedItems = append(uncachedItems, item)
+			continue
+		}
+
+		// Parse cached AI response
+		var result BatchTranslationResult
+		if err := json.Unmarshal([]byte(cache.AIResponse), &result); err != nil {
+			s.logger.Warn("Failed to parse cached translation, will re-translate",
+				"item", item, "error", err)
+			uncachedItems = append(uncachedItems, item)
+			continue
+		}
+
+		cached[item] = &result
+		s.logger.Debug("Found cached translation", "item", item, "target_locale", targetLocale)
+	}
+
+	s.logger.Info("Translation cache lookup completed",
+		"total_items", len(items),
+		"cached_items", len(cached),
+		"uncached_items", len(uncachedItems),
+		"target_locale", targetLocale)
+
+	return cached, uncachedItems, nil
+}
+
+// storeCachedTranslation stores a translation result in the cache
+func (s *Service) storeCachedTranslation(ctx context.Context, item string, targetLocale string, result *BatchTranslationResult) error {
+	itemHash := s.hashItem(item)
+	normalized := s.normalizeItem(item)
+
+	// Serialize AI response to JSON
+	aiResponseBytes, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("failed to serialize AI response: %w", err)
+	}
+
+	query := `INSERT INTO translation_cache (original_item, item_hash, target_locale, ai_response, detected_language, confidence)
+			  VALUES ($1, $2, $3, $4, $5, $6)
+			  ON CONFLICT (item_hash, target_locale) DO UPDATE SET
+			  ai_response = EXCLUDED.ai_response,
+			  detected_language = EXCLUDED.detected_language,
+			  confidence = EXCLUDED.confidence,
+			  updated_at = CURRENT_TIMESTAMP`
+
+	var detectedLang *string
+	if result.DetectedLanguage != "" {
+		detectedLang = &result.DetectedLanguage
+	}
+
+	var confidence *float64
+	if result.Confidence > 0 {
+		confidence = &result.Confidence
+	}
+
+	_, err = s.db.Exec(ctx, query, normalized, itemHash, targetLocale, string(aiResponseBytes), detectedLang, confidence)
+	if err != nil {
+		return fmt.Errorf("failed to store cached translation: %w", err)
+	}
+
+	s.logger.Debug("Stored translation in cache", "item", item, "target_locale", targetLocale)
+	return nil
 }

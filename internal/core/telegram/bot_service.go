@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/PocketPalCo/shopping-service/internal/core/families"
+	"github.com/PocketPalCo/shopping-service/internal/core/receipts"
 	"github.com/PocketPalCo/shopping-service/internal/core/shopping"
 	"github.com/PocketPalCo/shopping-service/internal/core/stt"
 	"github.com/PocketPalCo/shopping-service/internal/core/telegram/commands"
@@ -19,6 +20,7 @@ type BotService struct {
 	usersService    *users.Service
 	familiesService *families.Service
 	shoppingService *shopping.Service
+	receiptsService *receipts.Service
 	sttClient       *stt.Client
 	logger          *slog.Logger
 	templateManager *TemplateManager
@@ -35,13 +37,14 @@ type BotService struct {
 	userMapper                 *UserMapper
 
 	// New organized handlers
-	callbackRouter        *handlers.CallbackRouter
-	coreMessageHandler    *handlers.CoreMessageHandler
-	languageHandler       *handlers.LanguageHandler
-	userManagementHandler *handlers.UserManagementHandler
+	callbackRouter          *handlers.CallbackRouter
+	coreMessageHandler      *handlers.CoreMessageHandler
+	languageHandler         *handlers.LanguageHandler
+	userManagementHandler   *handlers.UserManagementHandler
+	receiptsCallbackHandler *handlers.ReceiptsCallbackHandler
 }
 
-func NewBotService(token string, usersService *users.Service, familiesService *families.Service, shoppingService *shopping.Service, sttClient *stt.Client, logger *slog.Logger, debug bool) (*BotService, error) {
+func NewBotService(token string, usersService *users.Service, familiesService *families.Service, shoppingService *shopping.Service, receiptsService *receipts.Service, sttClient *stt.Client, logger *slog.Logger, debug bool) (*BotService, error) {
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bot: %w", err)
@@ -55,13 +58,13 @@ func NewBotService(token string, usersService *users.Service, familiesService *f
 	}
 
 	// Set up command registry
-	commandRegistry := commands.SetupCommands(bot, usersService, familiesService, shoppingService, templateManager, logger)
+	commandRegistry := commands.SetupCommands(bot, usersService, familiesService, shoppingService, receiptsService, templateManager, logger)
 
 	// Set up user mapper
 	userMapper := NewUserMapper(usersService)
 
 	// Set up handlers
-	baseHandler := handlers.NewBaseHandler(bot, usersService, familiesService, shoppingService, templateManager, logger)
+	baseHandler := handlers.NewBaseHandler(bot, usersService, familiesService, shoppingService, receiptsService, templateManager, logger)
 	stateManager := handlers.NewStateManager(logger)
 	listCallbackHandler := handlers.NewListCallbackHandler(baseHandler, stateManager)
 	generalCallbackHandler := handlers.NewGeneralCallbackHandler(baseHandler, stateManager)
@@ -73,7 +76,8 @@ func NewBotService(token string, usersService *users.Service, familiesService *f
 	// Set up new organized handlers
 	languageHandler := handlers.NewLanguageHandler(baseHandler)
 	userManagementHandler := handlers.NewUserManagementHandler(baseHandler)
-	coreMessageHandler := handlers.NewCoreMessageHandler(baseHandler, sttClient, commandRegistry, stateManager)
+	receiptsCallbackHandler := handlers.NewReceiptsCallbackHandler(baseHandler, stateManager)
+	coreMessageHandler := handlers.NewCoreMessageHandler(baseHandler, sttClient, commandRegistry, stateManager, receiptsCallbackHandler)
 
 	// Set up callback router with all handlers
 	callbackRouter := handlers.NewCallbackRouter(
@@ -83,6 +87,7 @@ func NewBotService(token string, usersService *users.Service, familiesService *f
 		generalCallbackHandler,
 		duplicateCallbackHandler,
 		productListCallbackHandler,
+		receiptsCallbackHandler,
 		languageHandler,
 		stateManager,
 	)
@@ -92,6 +97,7 @@ func NewBotService(token string, usersService *users.Service, familiesService *f
 		usersService:               usersService,
 		familiesService:            familiesService,
 		shoppingService:            shoppingService,
+		receiptsService:            receiptsService,
 		sttClient:                  sttClient,
 		logger:                     logger,
 		templateManager:            templateManager,
@@ -106,10 +112,11 @@ func NewBotService(token string, usersService *users.Service, familiesService *f
 		userMapper:                 userMapper,
 
 		// New organized handlers
-		callbackRouter:        callbackRouter,
-		coreMessageHandler:    coreMessageHandler,
-		languageHandler:       languageHandler,
-		userManagementHandler: userManagementHandler,
+		callbackRouter:          callbackRouter,
+		coreMessageHandler:      coreMessageHandler,
+		languageHandler:         languageHandler,
+		userManagementHandler:   userManagementHandler,
+		receiptsCallbackHandler: receiptsCallbackHandler,
 	}, nil
 }
 
@@ -148,8 +155,8 @@ func (s *BotService) handleMessage(ctx context.Context, message *tgbotapi.Messag
 		return
 	}
 
-	// Notify admins if this is a new user
-	if internalUser.User != nil {
+	// Notify admins only if this is a newly created user
+	if internalUser.User != nil && internalUser.IsNewUser {
 		s.userManagementHandler.NotifyAdminsOfNewUser(ctx, internalUser.User)
 	}
 
@@ -166,6 +173,10 @@ func (s *BotService) handleMessage(ctx context.Context, message *tgbotapi.Messag
 		s.coreMessageHandler.HandleCommand(ctx, message, internalUser)
 	} else if message.Voice != nil || message.Audio != nil {
 		s.coreMessageHandler.HandleAudioMessage(ctx, message, internalUser)
+	} else if message.Photo != nil {
+		s.coreMessageHandler.HandlePhotoMessage(ctx, message, internalUser)
+	} else if message.Document != nil {
+		s.coreMessageHandler.HandleDocumentMessage(ctx, message, internalUser)
 	} else {
 		s.coreMessageHandler.HandleTextMessage(ctx, message, internalUser)
 	}

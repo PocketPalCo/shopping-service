@@ -16,6 +16,7 @@ type CallbackRouter struct {
 	generalCallbackHandler     *GeneralCallbackHandler
 	duplicateCallbackHandler   *DuplicateCallbackHandler
 	productListCallbackHandler *ProductListCallbackHandler
+	receiptsCallbackHandler    *ReceiptsCallbackHandler
 	languageHandler            *LanguageHandler
 	stateManager               *StateManager
 }
@@ -28,6 +29,7 @@ func NewCallbackRouter(
 	generalHandler *GeneralCallbackHandler,
 	duplicateHandler *DuplicateCallbackHandler,
 	productListHandler *ProductListCallbackHandler,
+	receiptsHandler *ReceiptsCallbackHandler,
 	languageHandler *LanguageHandler,
 	stateManager *StateManager,
 ) *CallbackRouter {
@@ -38,6 +40,7 @@ func NewCallbackRouter(
 		generalCallbackHandler:     generalHandler,
 		duplicateCallbackHandler:   duplicateHandler,
 		productListCallbackHandler: productListHandler,
+		receiptsCallbackHandler:    receiptsHandler,
 		languageHandler:            languageHandler,
 		stateManager:               stateManager,
 	}
@@ -53,8 +56,14 @@ func (r *CallbackRouter) RouteCallbackQuery(ctx context.Context, callback *tgbot
 		"data", callback.Data,
 		"chat_id", callback.Message.Chat.ID)
 
-	// Parse callback data
-	parts := strings.Split(callback.Data, "_")
+	// Parse callback data - handle both underscore and colon separators
+	var parts []string
+	if strings.Contains(callback.Data, ":") {
+		parts = strings.Split(callback.Data, ":")
+	} else {
+		parts = strings.Split(callback.Data, "_")
+	}
+
 	if len(parts) < 1 {
 		r.AnswerCallback(callback.ID, "❌ Invalid callback data.")
 		return
@@ -84,6 +93,12 @@ func (r *CallbackRouter) RouteCallbackQuery(ctx context.Context, callback *tgbot
 		r.duplicateCallbackHandler.HandleDuplicateCallback(ctx, callback, parts, user)
 	case "productlist":
 		r.productListCallbackHandler.HandleProductListCallback(ctx, callback, parts, user)
+	case "receipts":
+		if len(parts) >= 2 && parts[1] == "menu" {
+			r.receiptsCallbackHandler.HandleBackToReceiptsMenu(ctx, callback, user)
+		} else {
+			r.receiptsCallbackHandler.HandleReceiptsCallback(ctx, callback, parts, user)
+		}
 	case "lang":
 		r.routeLanguageCallback(ctx, callback, parts, user)
 	default:

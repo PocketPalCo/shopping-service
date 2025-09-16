@@ -24,7 +24,6 @@ import (
 	"log/slog"
 )
 
-
 func initGlobalMiddlewares(app *fiber.App, cfg *config.Config) {
 	app.Use(
 		compress.New(compress.Config{
@@ -34,7 +33,7 @@ func initGlobalMiddlewares(app *fiber.App, cfg *config.Config) {
 		slogfiber.NewWithFilters(slog.Default(), slogfiber.IgnorePath("/health")),
 
 		cors.New(cors.Config{
-			AllowOrigins: "*", // TODO - add allowed origins
+			AllowOrigins: "*", // Configure specific origins for production deployment
 			AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Request-ID",
 			AllowMethods: "GET, POST, PUT, DELETE, OPTIONS",
 		}),
@@ -48,14 +47,14 @@ func initGlobalMiddlewares(app *fiber.App, cfg *config.Config) {
 	)
 
 	app.Use(otelfiber.Middleware())
-	
+
 	// Global HTTP metrics middleware
 	app.Use(func(c *fiber.Ctx) error {
 		// Skip metrics endpoint to avoid recursion
 		if c.Path() == "/metrics" {
 			return c.Next()
 		}
-		
+
 		start := time.Now()
 		err := c.Next()
 		durationMs := float64(time.Since(start).Milliseconds())
