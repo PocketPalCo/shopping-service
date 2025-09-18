@@ -34,8 +34,9 @@ ENV SPEECHSDK_ROOT="/usr/local/SpeechSDK"
 RUN mkdir -p "$SPEECHSDK_ROOT" && \
     ARCH=$(uname -m) && \
     if [ "$ARCH" = "aarch64" ]; then \
-        wget -O SpeechSDK-Linux.tar.gz https://aka.ms/csspeech/linuxbinary-arm64 && \
-        export LIBDIR="arm64"; \
+        echo "ARM64 detected - using x64 Speech SDK as fallback" && \
+        wget -O SpeechSDK-Linux.tar.gz https://aka.ms/csspeech/linuxbinary && \
+        export LIBDIR="x64"; \
     else \
         wget -O SpeechSDK-Linux.tar.gz https://aka.ms/csspeech/linuxbinary && \
         export LIBDIR="x64"; \
@@ -46,8 +47,8 @@ RUN mkdir -p "$SPEECHSDK_ROOT" && \
 
 # Set environment variables for Speech SDK
 ENV CGO_CFLAGS="-I$SPEECHSDK_ROOT/include/c_api"
-ENV CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/arm64 -lMicrosoft.CognitiveServices.Speech.core"
-ENV LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/arm64:$LD_LIBRARY_PATH"
+ENV CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/x64 -lMicrosoft.CognitiveServices.Speech.core"
+ENV LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/x64:$LD_LIBRARY_PATH"
 
 WORKDIR /app
 
@@ -72,8 +73,8 @@ RUN apt-get update && apt-get install -y \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Speech SDK libraries from builder (ARM64)
-COPY --from=builder /usr/local/SpeechSDK/lib/arm64 /usr/local/lib/
+# Copy Speech SDK libraries from builder (x64 as fallback for ARM64)
+COPY --from=builder /usr/local/SpeechSDK/lib/x64 /usr/local/lib/
 RUN echo "/usr/local/lib" > /etc/ld.so.conf.d/speechsdk.conf && ldconfig
 
 RUN mkdir /app

@@ -48,7 +48,7 @@ services:
     restart: unless-stopped
     networks:
       - shopping-network
-      - observability_default
+      - observability_observability
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3009/health"]
       interval: 30s
@@ -58,5 +58,5 @@ services:
 networks:
   shopping-network:
     external: true
-  observability_default:
+  observability_observability:
     external: true
