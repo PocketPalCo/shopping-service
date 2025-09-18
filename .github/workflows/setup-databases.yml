@@ -1,0 +1,109 @@
+name: Setup Databases
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Database action'
+        required: true
+        default: 'up'
+        type: choice
+        options:
+        - up
+        - down
+        - restart
+  push:
+    branches: [ main ]
+    paths:
+      - 'docker-compose.db.yml'
+      - '.env.example'
+      - 'migrations/**'
+
+jobs:
+  setup-databases:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup environment variables
+      run: |
+        # Copy example env if .env doesn't exist
+        if [ ! -f .env ]; then
+          cp .env.example .env
+        fi
+
+        # Set default values for CI
+        echo "SSV_DB_USER=postgres" >> .env
+        echo "SSV_DB_PASSWORD=postgres" >> .env
+        echo "SSV_DB_DATABASE=pocket-pal" >> .env
+        echo "SSV_DB_PORT=5432" >> .env
+        echo "SSV_REDIS_PORT=6379" >> .env
+        echo "SSV_REDIS_PASS=redis" >> .env
+
+    - name: Create data directories
+      run: |
+        sudo mkdir -p /tmp/postgres-data
+        sudo mkdir -p /tmp/redis-data
+        sudo chmod 777 /tmp/postgres-data /tmp/redis-data
+
+    - name: Update docker-compose for CI
+      run: |
+        # Replace volume paths for CI environment
+        sed -i 's|/mnt/HC_Volume_103472708/postgres-data|/tmp/postgres-data|g' docker-compose.db.yml
+        sed -i 's|/mnt/HC_Volume_103472708/redis-data|/tmp/redis-data|g' docker-compose.db.yml
+
+    - name: Start databases
+      if: github.event.inputs.action == 'up' || github.event.inputs.action == '' || github.event_name == 'push'
+      run: |
+        docker compose -f docker-compose.db.yml up -d
+
+        # Wait for databases to be ready
+        echo "Waiting for PostgreSQL to be ready..."
+        timeout 60 bash -c 'until docker compose -f docker-compose.db.yml exec -T postgres pg_isready -U postgres; do sleep 2; done'
+
+        echo "Waiting for Redis to be ready..."
+        timeout 60 bash -c 'until docker compose -f docker-compose.db.yml exec -T redis redis-cli -a redis ping; do sleep 2; done'
+
+        echo "✅ Databases are ready!"
+
+    - name: Stop databases
+      if: github.event.inputs.action == 'down'
+      run: |
+        docker compose -f docker-compose.db.yml down -v
+        echo "✅ Databases stopped and volumes removed!"
+
+    - name: Restart databases
+      if: github.event.inputs.action == 'restart'
+      run: |
+        docker compose -f docker-compose.db.yml restart
+
+        # Wait for databases to be ready after restart
+        echo "Waiting for PostgreSQL to be ready..."
+        timeout 60 bash -c 'until docker compose -f docker-compose.db.yml exec -T postgres pg_isready -U postgres; do sleep 2; done'
+
+        echo "Waiting for Redis to be ready..."
+        timeout 60 bash -c 'until docker compose -f docker-compose.db.yml exec -T redis redis-cli -a redis ping; do sleep 2; done'
+
+        echo "✅ Databases restarted!"
+
+    - name: Show database status
+      run: |
+        echo "=== Database Container Status ==="
+        docker compose -f docker-compose.db.yml ps
+
+        echo -e "\n=== PostgreSQL Connection Test ==="
+        docker compose -f docker-compose.db.yml exec -T postgres psql -U postgres -d pocket-pal -c "SELECT version();" || echo "❌ PostgreSQL connection failed"
+
+        echo -e "\n=== Redis Connection Test ==="
+        docker compose -f docker-compose.db.yml exec -T redis redis-cli -a redis ping || echo "❌ Redis connection failed"
+
+    - name: Show logs on failure
+      if: failure()
+      run: |
+        echo "=== PostgreSQL Logs ==="
+        docker compose -f docker-compose.db.yml logs postgres
+
+        echo -e "\n=== Redis Logs ==="
+        docker compose -f docker-compose.db.yml logs redis
