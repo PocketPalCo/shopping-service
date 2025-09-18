@@ -64,37 +64,24 @@ jobs:
       run: |
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /opt/shopping-service
-
-          # Check if migrations directory exists
           if [ ! -d "migrations" ]; then
             echo "❌ No migrations directory found"
             exit 1
           fi
-
-          # Count migration files
           MIGRATION_COUNT=$(find migrations -name "*.sql" | wc -l)
           echo "Found $MIGRATION_COUNT migration files"
-
           if [ $MIGRATION_COUNT -eq 0 ]; then
             echo "❌ No migration files found"
             exit 1
           fi
-
-          # Build database URL
-          DB_URL="postgresql://postgres:${{ secrets.DB_PASSWORD }}@localhost:5432/pocket-pal?sslmode=disable"
-
-          # Test database connection
+          DB_URL="postgresql://${{ secrets.SSV_DB_USER }}:${{ secrets.SSV_DB_PASSWORD }}@${{ secrets.SSV_DB_HOST }}:${{ secrets.SSV_DB_PORT }}/${{ secrets.SSV_DB_DATABASE }}?sslmode=${{ secrets.SSV_DB_SSL }}"
           echo "Testing database connection..."
           if ! migrate -path migrations -database "$DB_URL" version &>/dev/null; then
             echo "❌ Cannot connect to database. Make sure PostgreSQL is running."
             exit 1
           fi
-
-          # Show current migration version
           echo "Current migration version:"
           migrate -path migrations -database "$DB_URL" version
-
-          # Run migrations based on direction
           if [ "${{ github.event.inputs.direction }}" = "up" ]; then
             echo "🔄 Running UP migrations..."
             migrate -path migrations -database "$DB_URL" up
@@ -103,11 +90,8 @@ jobs:
             echo "🔄 Running DOWN migrations ($STEPS steps)..."
             migrate -path migrations -database "$DB_URL" down $STEPS
           fi
-
-          # Show final migration version
           echo "Final migration version:"
           migrate -path migrations -database "$DB_URL" version
-
           echo "✅ Migration completed successfully!"
         EOF
 
@@ -115,16 +99,12 @@ jobs:
       run: |
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /opt/shopping-service
-
-          DB_URL="postgresql://postgres:${{ secrets.DB_PASSWORD }}@localhost:5432/pocket-pal?sslmode=disable"
-
+          DB_URL="postgresql://${{ secrets.SSV_DB_USER }}:${{ secrets.SSV_DB_PASSWORD }}@${{ secrets.SSV_DB_HOST }}:${{ secrets.SSV_DB_PORT }}/${{ secrets.SSV_DB_DATABASE }}?sslmode=${{ secrets.SSV_DB_SSL }}"
           echo "=== Migration Status ==="
           migrate -path migrations -database "$DB_URL" version
-
           echo ""
           echo "=== Database Tables ==="
           docker exec shopping-service-db psql -U postgres -d pocket-pal -c "\dt" || echo "Could not list tables"
-
           echo ""
           echo "=== Migration History ==="
           docker exec shopping-service-db psql -U postgres -d pocket-pal -c "SELECT version, dirty FROM schema_migrations ORDER BY version;" || echo "No migration history table"

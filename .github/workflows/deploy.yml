@@ -40,14 +40,11 @@ jobs:
     - name: Install dependencies on server
       run: |
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
-          # Install Go if not present
           if ! command -v go &> /dev/null; then
             wget https://go.dev/dl/go1.25.1.linux-amd64.tar.gz
             tar -C /usr/local -xzf go1.25.1.linux-amd64.tar.gz
             echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
           fi
-
-
           echo "Dependencies ready"
         EOF
 
@@ -60,24 +57,45 @@ jobs:
       run: |
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /opt/shopping-service
-
-          # Create .env file from secrets
           cat > .env << 'ENV_EOF'
-          SSV_ENVIRONMENT=production
-          SSV_SERVER_BIND_ADDR=0.0.0.0:3009
-          SSV_LOG_FORMAT=json
-          SSV_LOG_LEVEL=info
-          SSV_DB_HOST=localhost
-          SSV_DB_PORT=5432
-          SSV_DB_USER=postgres
-          SSV_DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          SSV_DB_DATABASE=pocket-pal
-          SSV_REDIS_HOST=localhost
-          SSV_REDIS_PORT=6379
-          SSV_REDIS_PASS=${{ secrets.REDIS_PASSWORD }}
-          SSV_OTLP_ENDPOINT=localhost:4317
-          SSV_TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
-          SSV_TELEGRAM_ADMINS=${{ secrets.TELEGRAM_ADMINS }}
+          SSV_ENVIRONMENT=${{ vars.SSV_ENVIRONMENT }}
+          SSV_SERVER_BIND_ADDR=${{ vars.SSV_SERVER_BIND_ADDR }}
+          SSV_SERVER_READ_TIMEOUT=${{ vars.SSV_SERVER_READ_TIMEOUT }}
+          SSV_LOG_FORMAT=${{ vars.SSV_LOG_FORMAT }}
+          SSV_LOG_LEVEL=${{ vars.SSV_LOG_LEVEL }}
+          SSV_RATE_LIMIT_MAX=${{ vars.SSV_RATE_LIMIT_MAX }}
+          SSV_RATE_LIMIT_WINDOW=${{ vars.SSV_RATE_LIMIT_WINDOW }}
+          SSV_DB_HOST=${{ vars.SSV_DB_HOST }}
+          SSV_DB_PORT=${{ vars.SSV_DB_PORT }}
+          SSV_DB_SSL=${{ vars.SSV_DB_SSL }}
+          SSV_DB_USER=${{ vars.SSV_DB_USER }}
+          SSV_DB_PASSWORD=${{ secrets.SSV_DB_PASSWORD }}
+          SSV_DB_DATABASE=${{ vars.SSV_DB_DATABASE }}
+          SSV_DB_MAX_CONNECTIONS=${{ vars.SSV_DB_MAX_CONNECTIONS }}
+          SSV_REDIS_HOST=${{ vars.SSV_REDIS_HOST }}
+          SSV_REDIS_PORT=${{ vars.SSV_REDIS_PORT }}
+          SSV_REDIS_DB=${{ vars.SSV_REDIS_DB }}
+          SSV_REDIS_USER=${{ vars.SSV_REDIS_USER }}
+          SSV_REDIS_PASS=${{ secrets.SSV_REDIS_PASS }}
+          SSV_OTLP_ENDPOINT=${{ vars.SSV_OTLP_ENDPOINT }}
+          SSV_JAEGER_ENDPOINT=${{ vars.SSV_JAEGER_ENDPOINT }}
+          SSV_TELEGRAM_BOT_TOKEN=${{ secrets.SSV_TELEGRAM_BOT_TOKEN }}
+          SSV_TELEGRAM_DEBUG=${{ vars.SSV_TELEGRAM_DEBUG }}
+          SSV_TELEGRAM_ADMINS=${{ secrets.SSV_TELEGRAM_ADMINS }}
+          SSV_OPENAI_API_KEY=${{ secrets.SSV_OPENAI_API_KEY }}
+          SSV_OPENAI_MODEL=${{ vars.SSV_OPENAI_MODEL }}
+          SSV_OPENAI_BASE_URL=${{ vars.SSV_OPENAI_BASE_URL }}
+          SSV_OPENAI_MAX_TOKENS=${{ vars.SSV_OPENAI_MAX_TOKENS }}
+          SSV_OPENAI_TEMPERATURE=${{ vars.SSV_OPENAI_TEMPERATURE }}
+          SSV_AZURE_SPEECH_KEY=${{ secrets.SSV_AZURE_SPEECH_KEY }}
+          SSV_AZURE_SPEECH_REGION=${{ vars.SSV_AZURE_SPEECH_REGION }}
+          SSV_CLOUD_PROVIDER=${{ vars.SSV_CLOUD_PROVIDER }}
+          SSV_AZURE_STORAGE_CONNECTION_STRING=${{ secrets.SSV_AZURE_STORAGE_CONNECTION_STRING }}
+          SSV_AZURE_STORAGE_CONTAINER_NAME=${{ vars.SSV_AZURE_STORAGE_CONTAINER_NAME }}
+          SSV_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=${{ secrets.SSV_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT }}
+          SSV_AZURE_DOCUMENT_INTELLIGENCE_API_KEY=${{ secrets.SSV_AZURE_DOCUMENT_INTELLIGENCE_API_KEY }}
+          SSV_AZURE_DOCUMENT_INTELLIGENCE_API_VERSION=${{ vars.SSV_AZURE_DOCUMENT_INTELLIGENCE_API_VERSION }}
+          SSV_AZURE_DOCUMENT_INTELLIGENCE_RECEIPT_MODEL=${{ vars.SSV_AZURE_DOCUMENT_INTELLIGENCE_RECEIPT_MODEL }}
           ENV_EOF
         EOF
 
@@ -86,24 +104,14 @@ jobs:
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /opt/shopping-service
           export PATH=$PATH:/usr/local/go/bin
-
-          # Stop existing service and containers
           systemctl stop shopping-service || true
           docker compose -f docker-compose.prod.yml down || true
-
-          # Start database containers
           docker compose -f docker-compose.prod.yml up -d
-
-          # Wait for database
           echo "Waiting for database to be ready..."
           sleep 15
-
-          # Build the service
           echo "Building shopping service..."
           go mod tidy
           go build -o shopping-service cmd/main.go
-
-          # Create systemd service that uses .env file
           cat > /etc/systemd/system/shopping-service.service << 'SERVICE_EOF'
           [Unit]
           Description=Shopping Service
@@ -122,12 +130,9 @@ jobs:
           [Install]
           WantedBy=multi-user.target
           SERVICE_EOF
-
-          # Start the service
           systemctl daemon-reload
           systemctl enable shopping-service
           systemctl restart shopping-service
-
           echo "Deployment completed!"
         EOF
 
@@ -136,21 +141,16 @@ jobs:
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           echo "=== Service Status ==="
           systemctl status shopping-service --no-pager
-
           echo ""
           echo "=== Health Check ==="
-          # Wait for service to fully start
           sleep 10
           curl -f http://localhost:3009/health || echo "Health check failed (service may still be starting)"
-
           echo ""
           echo "=== Service Logs (last 20 lines) ==="
           journalctl -u shopping-service --no-pager -n 20
-
           echo ""
           echo "=== Port Check ==="
           netstat -tlnp | grep :3009 || echo "Service not listening on port 3009"
-
           echo ""
           echo "=== Process Check ==="
           ps aux | grep shopping-service | grep -v grep || echo "Shopping service process not found"
