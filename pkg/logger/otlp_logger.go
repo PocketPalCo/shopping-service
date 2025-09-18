@@ -119,3 +119,21 @@ func (m *MultiHandler) WithGroup(name string) slog.Handler {
 	}
 	return &MultiHandler{handlers: newHandlers}
 }
+
+// NewJSONLogger creates a standard JSON logger that outputs to stdout only
+// This is for use with Promtail log collection (no OTLP)
+func NewJSONLogger(cfg *config.Config) *slog.Logger {
+	// Create stdout JSON handler
+	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: cfg.GetSlogLevel(),
+	})
+
+	// Create the logger with service metadata
+	logger := slog.New(jsonHandler).With(
+		"service", "shopping-service",
+		"version", "1.0.0",
+		"environment", cfg.Environment,
+	)
+
+	return logger
+}

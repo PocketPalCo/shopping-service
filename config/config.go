@@ -42,8 +42,9 @@ type Config struct {
 	RedisUser string `mapstructure:"SSV_REDIS_USER"`
 	RedisPass string `mapstructure:"SSV_REDIS_PASS"`
 
-	OtlpEndpoint   string `mapstructure:"SSV_OTLP_ENDPOINT"`
-	JaegerEndpoint string `mapstructure:"SSV_JAEGER_ENDPOINT"`
+	OtlpEndpoint    string `mapstructure:"SSV_OTLP_ENDPOINT"`
+	OtlpLogsEnabled bool   `mapstructure:"SSV_OTLP_LOGS_ENABLED"`
+	JaegerEndpoint  string `mapstructure:"SSV_JAEGER_ENDPOINT"`
 
 	// Telegram Bot Configuration
 	TelegramBotToken string `mapstructure:"SSV_TELEGRAM_BOT_TOKEN"`
@@ -110,8 +111,9 @@ func DefaultConfig() Config {
 		RedisUser: "redis",
 		RedisPass: "redis",
 
-		OtlpEndpoint:   "localhost:4317",
-		JaegerEndpoint: "http://localhost:14268/api/traces",
+		OtlpEndpoint:    "localhost:4317",
+		OtlpLogsEnabled: false, // Prefer Promtail for logs, OTEL for metrics/traces only
+		JaegerEndpoint:  "http://localhost:14268/api/traces",
 
 		TelegramBotToken: "",
 		TelegramDebug:    false,
@@ -189,6 +191,7 @@ func ConfigFromEnvironment() (config Config, err error) {
 	viper.SetDefault("SSV_DB_MAX_CONNECTIONS", config.DbMaxConnections)
 	viper.SetDefault("SSV_SWAGGER_HOST", config.SwaggerHost)
 	viper.SetDefault("SSV_OTLP_ENDPOINT", config.OtlpEndpoint)
+	viper.SetDefault("SSV_OTLP_LOGS_ENABLED", config.OtlpLogsEnabled)
 	viper.SetDefault("SSV_JAEGER_ENDPOINT", config.JaegerEndpoint)
 	viper.SetDefault("SSV_REDIS_HOST", config.RedisHost)
 	viper.SetDefault("SSV_REDIS_PORT", config.RedisPort)

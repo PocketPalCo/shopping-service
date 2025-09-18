@@ -22,24 +22,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize OTLP-only logger
+	// Initialize logger based on configuration
 	var loggerProvider *log.LoggerProvider
-	otlpLogger, loggerProvider, err := logger.NewOTLPOnlyLogger(&cfg)
-	if err != nil {
-		slog.Error("Failed to initialize OTLP logger", 
-			"error", err.Error(),
-			"service", "shopping-service",
-			"component", "logger")
-		os.Exit(1)
+	if cfg.OtlpLogsEnabled {
+		// OTLP logging enabled - use OTLP for logs
+		otlpLogger, otlpLoggerProvider, err := logger.NewOTLPOnlyLogger(&cfg)
+		if err != nil {
+			slog.Error("Failed to initialize OTLP logger",
+				"error", err.Error(),
+				"service", "shopping-service",
+				"component", "logger")
+			os.Exit(1)
+		} else {
+			loggerProvider = otlpLoggerProvider
+			slog.SetDefault(otlpLogger)
+			slog.Info("OTLP logging enabled successfully",
+				"endpoint", cfg.OtlpEndpoint,
+				"service", "shopping-service",
+				"component", "logger")
+		}
 	} else {
-		slog.SetDefault(otlpLogger)
-		slog.Info("OTLP-only logging enabled successfully", 
-			"endpoint", cfg.OtlpEndpoint,
+		// OTLP logging disabled - use standard logging (Promtail will collect from container logs)
+		jsonLogger := logger.NewJSONLogger(&cfg)
+		slog.SetDefault(jsonLogger)
+		slog.Info("Standard JSON logging enabled (logs will be collected by Promtail)",
 			"service", "shopping-service",
-			"component", "logger")
-		
-		// Store loggerProvider for cleanup (you might want to add this to your server struct)
-		_ = loggerProvider
+			"component", "logger",
+			"log_level", cfg.LogLevel)
 	}
 
 	slog.Info("Starting shopping service",
@@ -86,7 +95,7 @@ func main() {
 	slog.Info("Shutdown signal received, stopping server", "component", "main")
 	mainServer.Shutdown()
 	conn.Close()
-	
+
 	// Cleanup OTLP logger provider if it was initialized
 	if loggerProvider != nil {
 		ctx := context.Background()
@@ -94,6 +103,6 @@ func main() {
 			slog.Error("Failed to shutdown logger provider", "error", err.Error())
 		}
 	}
-	
+
 	slog.Info("Service shutdown complete", "component", "main")
 }
