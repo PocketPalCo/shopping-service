@@ -13,6 +13,9 @@ import (
 
 	"github.com/PocketPalCo/shopping-service/config"
 	"github.com/PocketPalCo/shopping-service/internal/core/products"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 type ProductService interface {
@@ -25,6 +28,16 @@ type openAIClient struct {
 	logger         *slog.Logger
 	promptBuilder  *PromptBuilder
 	productService ProductService
+
+	// Metrics
+	parseRequestsTotal       metric.Int64Counter
+	parseRequestDuration     metric.Float64Histogram
+	parseRequestErrors       metric.Int64Counter
+	apiRequestsTotal         metric.Int64Counter
+	apiRequestDuration       metric.Float64Histogram
+	apiRequestErrors         metric.Int64Counter
+	tokensUsed               metric.Int64Counter
+	confidenceScoreHistogram metric.Float64Histogram
 }
 
 // Chat Completions API structures (legacy)
@@ -131,6 +144,51 @@ func NewOpenAIClientWithPrompts(cfg config.OpenAIConfig, logger *slog.Logger, pr
 		promptBuilder = nil // Will use fallback prompts
 	}
 
+	// Initialize metrics
+	meter := otel.Meter("ai-service")
+
+	parseRequestsTotal, _ := meter.Int64Counter(
+		"ai_parse_requests_total",
+		metric.WithDescription("Total number of AI parsing requests"),
+	)
+
+	parseRequestDuration, _ := meter.Float64Histogram(
+		"ai_parse_request_duration_seconds",
+		metric.WithDescription("Duration of AI parsing requests"),
+		metric.WithUnit("s"),
+	)
+
+	parseRequestErrors, _ := meter.Int64Counter(
+		"ai_parse_request_errors_total",
+		metric.WithDescription("Total number of AI parsing request errors"),
+	)
+
+	apiRequestsTotal, _ := meter.Int64Counter(
+		"ai_api_requests_total",
+		metric.WithDescription("Total number of OpenAI API requests"),
+	)
+
+	apiRequestDuration, _ := meter.Float64Histogram(
+		"ai_api_request_duration_seconds",
+		metric.WithDescription("Duration of OpenAI API requests"),
+		metric.WithUnit("s"),
+	)
+
+	apiRequestErrors, _ := meter.Int64Counter(
+		"ai_api_request_errors_total",
+		metric.WithDescription("Total number of OpenAI API request errors"),
+	)
+
+	tokensUsed, _ := meter.Int64Counter(
+		"ai_tokens_used_total",
+		metric.WithDescription("Total number of tokens used"),
+	)
+
+	confidenceScoreHistogram, _ := meter.Float64Histogram(
+		"ai_confidence_score",
+		metric.WithDescription("Confidence scores of AI parsing results"),
+	)
+
 	return &openAIClient{
 		config: cfg,
 		httpClient: &http.Client{
@@ -139,21 +197,167 @@ func NewOpenAIClientWithPrompts(cfg config.OpenAIConfig, logger *slog.Logger, pr
 		logger:         logger,
 		promptBuilder:  promptBuilder,
 		productService: productService,
+
+		// Metrics
+		parseRequestsTotal:       parseRequestsTotal,
+		parseRequestDuration:     parseRequestDuration,
+		parseRequestErrors:       parseRequestErrors,
+		apiRequestsTotal:         apiRequestsTotal,
+		apiRequestDuration:       apiRequestDuration,
+		apiRequestErrors:         apiRequestErrors,
+		tokensUsed:               tokensUsed,
+		confidenceScoreHistogram: confidenceScoreHistogram,
 	}
 }
 
 func (c *openAIClient) ParseItem(ctx context.Context, rawText, languageCode string) (*ParsedResult, error) {
-	if c.config.UseResponsesAPI {
-		return c.parseItemWithResponsesAPI(ctx, rawText, languageCode)
+	startTime := time.Now()
+
+	// Record parse request metrics
+	apiType := map[bool]string{true: "responses_api", false: "chat_completions"}[c.config.UseResponsesAPI]
+	attrs := []attribute.KeyValue{
+		attribute.String("api_type", apiType),
+		attribute.String("language_code", languageCode),
+		attribute.String("operation", "parse_single_item"),
 	}
-	return c.parseItemWithChatCompletions(ctx, rawText, languageCode)
+
+	c.parseRequestsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
+
+	var result *ParsedResult
+	var err error
+
+	if c.config.UseResponsesAPI {
+		result, err = c.parseItemWithResponsesAPI(ctx, rawText, languageCode)
+	} else {
+		result, err = c.parseItemWithChatCompletions(ctx, rawText, languageCode)
+	}
+
+	duration := time.Since(startTime)
+	c.parseRequestDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(attrs...))
+
+	if err != nil {
+		// Record error metrics
+		errorAttrs := append(attrs, attribute.String("error_type", fmt.Sprintf("%T", err)))
+		c.parseRequestErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+
+		c.logger.Error("Item parsing failed",
+			"raw_text", rawText,
+			"language_code", languageCode,
+			"processing_time_ms", duration.Milliseconds(),
+			"error", err.Error(),
+			"error_type", fmt.Sprintf("%T", err),
+			"api_type", apiType,
+			"component", "ai_parsing")
+		return nil, err
+	}
+
+	// Record success metrics
+	successAttrs := append(attrs,
+		attribute.String("outcome", "success"),
+		attribute.String("category", result.Category),
+	)
+	c.confidenceScoreHistogram.Record(ctx, result.ConfidenceScore, metric.WithAttributes(successAttrs...))
+
+	c.logger.Info("Item parsing completed successfully",
+		"raw_text", rawText,
+		"language_code", languageCode,
+		"parsed_name", result.StandardizedName,
+		"parsed_quantity_value", result.QuantityValue,
+		"parsed_quantity_unit", result.QuantityUnit,
+		"parsed_category", result.Category,
+		"confidence_score", result.ConfidenceScore,
+		"processing_time_ms", duration.Milliseconds(),
+		"api_type", apiType,
+		"component", "ai_parsing")
+
+	return result, nil
 }
 
 func (c *openAIClient) ParseItems(ctx context.Context, rawText, languageCode string) ([]*ParsedResult, error) {
-	if c.config.UseResponsesAPI {
-		return c.parseItemsWithResponsesAPI(ctx, rawText, languageCode)
+	startTime := time.Now()
+
+	// Record parse request metrics
+	apiType := map[bool]string{true: "responses_api", false: "chat_completions"}[c.config.UseResponsesAPI]
+	attrs := []attribute.KeyValue{
+		attribute.String("api_type", apiType),
+		attribute.String("language_code", languageCode),
+		attribute.String("operation", "parse_multiple_items"),
+		attribute.Int("text_length", len(rawText)),
 	}
-	return c.parseItemsWithChatCompletions(ctx, rawText, languageCode)
+
+	c.parseRequestsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
+
+	var results []*ParsedResult
+	var err error
+
+	if c.config.UseResponsesAPI {
+		results, err = c.parseItemsWithResponsesAPI(ctx, rawText, languageCode)
+	} else {
+		results, err = c.parseItemsWithChatCompletions(ctx, rawText, languageCode)
+	}
+
+	duration := time.Since(startTime)
+	c.parseRequestDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(attrs...))
+
+	if err != nil {
+		// Record error metrics
+		errorAttrs := append(attrs, attribute.String("error_type", fmt.Sprintf("%T", err)))
+		c.parseRequestErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+
+		c.logger.Error("Multi-item parsing failed",
+			"raw_text", rawText,
+			"language_code", languageCode,
+			"text_length", len(rawText),
+			"processing_time_ms", duration.Milliseconds(),
+			"error", err.Error(),
+			"error_type", fmt.Sprintf("%T", err),
+			"api_type", apiType,
+			"component", "ai_parsing")
+		return nil, err
+	}
+
+	// Record success metrics
+	itemNames := make([]string, len(results))
+	totalConfidence := 0.0
+	for i, result := range results {
+		itemNames[i] = result.StandardizedName
+		totalConfidence += result.ConfidenceScore
+
+		// Record individual item confidence scores
+		itemAttrs := append(attrs,
+			attribute.String("outcome", "success"),
+			attribute.String("category", result.Category),
+			attribute.Int("item_index", i),
+		)
+		c.confidenceScoreHistogram.Record(ctx, result.ConfidenceScore, metric.WithAttributes(itemAttrs...))
+	}
+
+	avgConfidence := totalConfidence / float64(len(results))
+
+	// Record batch processing metrics
+	successAttrs := append(attrs,
+		attribute.String("outcome", "success"),
+		attribute.Int("items_parsed", len(results)),
+		attribute.Float64("average_confidence", avgConfidence),
+		attribute.Float64("items_per_second", float64(len(results))/duration.Seconds()),
+	)
+
+	// Record overall parsing success (could add more metrics here if needed)
+	_ = successAttrs // Mark as used for future extension
+
+	c.logger.Info("Multi-item parsing completed successfully",
+		"raw_text", rawText,
+		"language_code", languageCode,
+		"text_length", len(rawText),
+		"items_parsed", len(results),
+		"parsed_items", itemNames,
+		"average_confidence", avgConfidence,
+		"processing_time_ms", duration.Milliseconds(),
+		"items_per_second", float64(len(results))/duration.Seconds(),
+		"api_type", apiType,
+		"component", "ai_parsing")
+
+	return results, nil
 }
 
 func (c *openAIClient) parseItemWithResponsesAPI(ctx context.Context, rawText, languageCode string) (*ParsedResult, error) {
@@ -192,29 +396,95 @@ func (c *openAIClient) parseItemWithResponsesAPI(ctx context.Context, rawText, l
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
+		c.logger.Error("Failed to marshal OpenAI request",
+			"error", err.Error(),
+			"raw_text", rawText,
+			"language_code", languageCode,
+			"component", "ai_parsing",
+			"error_category", "json_marshal")
 		return nil, fmt.Errorf("failed to marshal responses request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.config.BaseURL+"/responses", bytes.NewBuffer(jsonBody))
 	if err != nil {
+		c.logger.Error("Failed to create HTTP request",
+			"error", err.Error(),
+			"url", c.config.BaseURL+"/responses",
+			"raw_text", rawText,
+			"language_code", languageCode,
+			"component", "ai_parsing",
+			"error_category", "http_request_creation")
 		return nil, fmt.Errorf("failed to create responses request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
 
+	requestStart := time.Now()
+
+	// Record API request metrics
+	apiAttrs := []attribute.KeyValue{
+		attribute.String("api_endpoint", "responses"),
+		attribute.String("language_code", languageCode),
+		attribute.String("model", c.config.Model),
+	}
+	c.apiRequestsTotal.Add(ctx, 1, metric.WithAttributes(apiAttrs...))
+
 	resp, err := c.httpClient.Do(req)
+	requestDuration := time.Since(requestStart)
+	c.apiRequestDuration.Record(ctx, requestDuration.Seconds(), metric.WithAttributes(apiAttrs...))
+
 	if err != nil {
+		// Record API error metrics
+		errorAttrs := append(apiAttrs,
+			attribute.String("error_type", fmt.Sprintf("%T", err)),
+			attribute.String("error_category", "http_request_failed"),
+		)
+		c.apiRequestErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+
+		c.logger.Error("HTTP request to OpenAI failed",
+			"error", err.Error(),
+			"url", c.config.BaseURL+"/responses",
+			"request_duration_ms", requestDuration.Milliseconds(),
+			"raw_text", rawText,
+			"language_code", languageCode,
+			"component", "ai_parsing",
+			"error_category", "http_request_failed")
 		return nil, fmt.Errorf("failed to make responses request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		c.logger.Error("Failed to read response body",
+			"error", err.Error(),
+			"status_code", resp.StatusCode,
+			"request_duration_ms", requestDuration.Milliseconds(),
+			"raw_text", rawText,
+			"language_code", languageCode,
+			"component", "ai_parsing",
+			"error_category", "response_read")
 		return nil, fmt.Errorf("failed to read responses: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		// Record API error metrics for non-200 status codes
+		errorAttrs := append(apiAttrs,
+			attribute.String("error_type", "api_error"),
+			attribute.String("error_category", "api_error"),
+			attribute.Int("status_code", resp.StatusCode),
+		)
+		c.apiRequestErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+
+		c.logger.Error("OpenAI API returned error status",
+			"status_code", resp.StatusCode,
+			"response_body", string(body),
+			"request_duration_ms", requestDuration.Milliseconds(),
+			"url", c.config.BaseURL+"/responses",
+			"raw_text", rawText,
+			"language_code", languageCode,
+			"component", "ai_parsing",
+			"error_category", "api_error")
 		return nil, fmt.Errorf("responses API error: %d - %s", resp.StatusCode, string(body))
 	}
 
@@ -235,6 +505,13 @@ func (c *openAIClient) parseItemWithResponsesAPI(ctx context.Context, rawText, l
 		c.logger.Error("Failed to parse AI response from Responses API", "error", err, "response", outputText)
 		return nil, fmt.Errorf("failed to parse AI response: %w", err)
 	}
+
+	// Record token usage metrics
+	tokenAttrs := append(apiAttrs,
+		attribute.String("token_type", "total"),
+		attribute.String("outcome", "success"),
+	)
+	c.tokensUsed.Add(ctx, int64(responsesResp.Usage.TotalTokens), metric.WithAttributes(tokenAttrs...))
 
 	c.logger.Info("Successfully parsed item with Responses API",
 		"raw_text", rawText,
@@ -275,8 +552,28 @@ func (c *openAIClient) parseItemWithChatCompletions(ctx context.Context, rawText
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
 
+	requestStart := time.Now()
+
+	// Record API request metrics
+	apiAttrs := []attribute.KeyValue{
+		attribute.String("api_endpoint", "chat_completions"),
+		attribute.String("language_code", languageCode),
+		attribute.String("model", c.config.Model),
+	}
+	c.apiRequestsTotal.Add(ctx, 1, metric.WithAttributes(apiAttrs...))
+
 	resp, err := c.httpClient.Do(req)
+	requestDuration := time.Since(requestStart)
+	c.apiRequestDuration.Record(ctx, requestDuration.Seconds(), metric.WithAttributes(apiAttrs...))
+
 	if err != nil {
+		// Record API error metrics
+		errorAttrs := append(apiAttrs,
+			attribute.String("error_type", fmt.Sprintf("%T", err)),
+			attribute.String("error_category", "http_request_failed"),
+		)
+		c.apiRequestErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+
 		return nil, fmt.Errorf("failed to make chat completion request: %w", err)
 	}
 	defer resp.Body.Close()
@@ -287,6 +584,14 @@ func (c *openAIClient) parseItemWithChatCompletions(ctx context.Context, rawText
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		// Record API error metrics for non-200 status codes
+		errorAttrs := append(apiAttrs,
+			attribute.String("error_type", "api_error"),
+			attribute.String("error_category", "api_error"),
+			attribute.Int("status_code", resp.StatusCode),
+		)
+		c.apiRequestErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+
 		return nil, fmt.Errorf("chat completion API error: %d - %s", resp.StatusCode, string(body))
 	}
 
@@ -305,6 +610,13 @@ func (c *openAIClient) parseItemWithChatCompletions(ctx context.Context, rawText
 		c.logger.Error("Failed to parse AI response from Chat Completions", "error", err, "response", chatResp.Choices[0].Message.Content)
 		return nil, fmt.Errorf("failed to parse AI response: %w", err)
 	}
+
+	// Record token usage metrics
+	tokenAttrs := append(apiAttrs,
+		attribute.String("token_type", "total"),
+		attribute.String("outcome", "success"),
+	)
+	c.tokensUsed.Add(ctx, int64(chatResp.Usage.TotalTokens), metric.WithAttributes(tokenAttrs...))
 
 	c.logger.Info("Successfully parsed item with Chat Completions",
 		"raw_text", rawText,

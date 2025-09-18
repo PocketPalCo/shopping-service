@@ -11,6 +11,9 @@ import (
 	"github.com/PocketPalCo/shopping-service/internal/core/stt"
 	"github.com/PocketPalCo/shopping-service/internal/core/telegram/commands"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // InternalUser represents the bot's internal user structure (alias for BotInternalUser)
@@ -23,16 +26,87 @@ type CoreMessageHandler struct {
 	commandRegistry         *commands.CommandRegistry
 	stateManager            *StateManager
 	receiptsCallbackHandler *ReceiptsCallbackHandler
+
+	// Metrics
+	audioMessagesTotal        metric.Int64Counter
+	audioProcessingDuration   metric.Float64Histogram
+	audioProcessingErrors     metric.Int64Counter
+	textMessagesTotal         metric.Int64Counter
+	textProcessingDuration    metric.Float64Histogram
+	textProcessingErrors      metric.Int64Counter
+	itemsAddedTotal           metric.Int64Counter
+	messagesWithoutItemsTotal metric.Int64Counter
 }
 
 // NewCoreMessageHandler creates a new core message handler
 func NewCoreMessageHandler(base BaseHandler, sttService *stt.Client, commandRegistry *commands.CommandRegistry, stateManager *StateManager, receiptsCallbackHandler *ReceiptsCallbackHandler) *CoreMessageHandler {
+	meter := otel.Meter("telegram_handlers")
+
+	// Initialize metrics
+	audioMessagesTotal, _ := meter.Int64Counter(
+		"telegram_audio_messages_total",
+		metric.WithDescription("Total number of audio messages processed"),
+		metric.WithUnit("1"),
+	)
+
+	audioProcessingDuration, _ := meter.Float64Histogram(
+		"telegram_audio_processing_duration_seconds",
+		metric.WithDescription("Duration of audio message processing"),
+		metric.WithUnit("s"),
+	)
+
+	audioProcessingErrors, _ := meter.Int64Counter(
+		"telegram_audio_processing_errors_total",
+		metric.WithDescription("Total number of audio processing errors"),
+		metric.WithUnit("1"),
+	)
+
+	textMessagesTotal, _ := meter.Int64Counter(
+		"telegram_text_messages_total",
+		metric.WithDescription("Total number of text messages processed"),
+		metric.WithUnit("1"),
+	)
+
+	textProcessingDuration, _ := meter.Float64Histogram(
+		"telegram_text_processing_duration_seconds",
+		metric.WithDescription("Duration of text message processing"),
+		metric.WithUnit("s"),
+	)
+
+	textProcessingErrors, _ := meter.Int64Counter(
+		"telegram_text_processing_errors_total",
+		metric.WithDescription("Total number of text processing errors"),
+		metric.WithUnit("1"),
+	)
+
+	itemsAddedTotal, _ := meter.Int64Counter(
+		"telegram_items_added_total",
+		metric.WithDescription("Total number of shopping items added via Telegram"),
+		metric.WithUnit("1"),
+	)
+
+	messagesWithoutItemsTotal, _ := meter.Int64Counter(
+		"telegram_messages_without_items_total",
+		metric.WithDescription("Total number of messages that did not result in item additions"),
+		metric.WithUnit("1"),
+	)
+
 	return &CoreMessageHandler{
 		BaseHandler:             base,
 		sttService:              sttService,
 		commandRegistry:         commandRegistry,
 		stateManager:            stateManager,
 		receiptsCallbackHandler: receiptsCallbackHandler,
+
+		// Metrics
+		audioMessagesTotal:        audioMessagesTotal,
+		audioProcessingDuration:   audioProcessingDuration,
+		audioProcessingErrors:     audioProcessingErrors,
+		textMessagesTotal:         textMessagesTotal,
+		textProcessingDuration:    textProcessingDuration,
+		textProcessingErrors:      textProcessingErrors,
+		itemsAddedTotal:           itemsAddedTotal,
+		messagesWithoutItemsTotal: messagesWithoutItemsTotal,
 	}
 }
 
@@ -76,17 +150,49 @@ func (h *CoreMessageHandler) HandleCommand(ctx context.Context, message *tgbotap
 
 // HandleTextMessage processes regular text messages
 func (h *CoreMessageHandler) HandleTextMessage(ctx context.Context, message *tgbotapi.Message, user *InternalUser) {
-	if !user.IsAuthorized {
-		h.logger.Debug("Ignoring text message from unauthorized user",
-			"user_id", user.TelegramID,
-			"message", message.Text)
-		return
+	startTime := time.Now()
+
+	// Determine message type for metrics
+	messageType := "text_direct"
+	if strings.Contains(message.Text, "🎤") || len(message.Text) > 200 {
+		messageType = "text_from_audio" // Likely transcribed
 	}
 
-	h.logger.Info("Processing text message",
+	// Record text message metrics
+	textAttrs := []attribute.KeyValue{
+		attribute.String("user_id", fmt.Sprintf("%d", user.TelegramID)),
+		attribute.Bool("authorized", user.IsAuthorized),
+		attribute.String("message_type", messageType),
+		attribute.Int("message_length", len(message.Text)),
+	}
+	h.textMessagesTotal.Add(ctx, 1, metric.WithAttributes(textAttrs...))
+
+	h.logger.Info("📝 Text message processing started",
 		"user_id", user.TelegramID,
 		"chat_id", message.Chat.ID,
-		"message_length", len(message.Text))
+		"message_length", len(message.Text),
+		"message_type", messageType,
+		"authorized", user.IsAuthorized,
+		"component", "text_processing")
+
+	if !user.IsAuthorized {
+		// Record unauthorized error
+		errorAttrs := append(textAttrs,
+			attribute.String("error_type", "unauthorized"),
+			attribute.String("error_category", "authorization"),
+		)
+		h.textProcessingErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+		h.textProcessingDuration.Record(ctx, time.Since(startTime).Seconds(), metric.WithAttributes(errorAttrs...))
+
+		h.logger.Warn("Unauthorized text message attempt",
+			"user_id", user.TelegramID,
+			"message", message.Text,
+			"message_length", len(message.Text),
+			"processing_time_ms", time.Since(startTime).Milliseconds(),
+			"component", "text_processing",
+			"error_category", "unauthorized")
+		return
+	}
 
 	// Check for user states first
 	if familyIDStr, hasState := h.stateManager.GetUserState(user.TelegramID, "creating_list_for_family"); hasState {
@@ -117,20 +223,53 @@ func (h *CoreMessageHandler) HandleTextMessage(ctx context.Context, message *tgb
 
 // HandleAudioMessage processes voice messages
 func (h *CoreMessageHandler) HandleAudioMessage(ctx context.Context, message *tgbotapi.Message, user *InternalUser) {
+	startTime := time.Now()
+
+	// Record audio message metrics
+	audioAttrs := []attribute.KeyValue{
+		attribute.String("user_id", fmt.Sprintf("%d", user.TelegramID)),
+		attribute.Bool("authorized", user.IsAuthorized),
+		attribute.String("audio_type", "unknown"), // Will be updated when we determine the type
+	}
+	h.audioMessagesTotal.Add(ctx, 1, metric.WithAttributes(audioAttrs...))
+
 	// Add panic recovery to prevent crashing the bot
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Error("❌ Panic in HandleAudioMessage",
 				"panic", r,
 				"user_id", user.TelegramID,
-				"message_id", message.MessageID)
+				"message_id", message.MessageID,
+				"processing_time_ms", time.Since(startTime).Milliseconds(),
+				"component", "audio_processing",
+				"error_category", "panic")
 		}
 	}()
+
+	// Log audio message attempt
+	h.logger.Info("🎤 Audio message processing started",
+		"user_id", user.TelegramID,
+		"chat_id", message.Chat.ID,
+		"message_id", message.MessageID,
+		"authorized", user.IsAuthorized,
+		"component", "audio_processing")
+
 	if !user.IsAuthorized {
-		h.logger.Debug("Ignoring audio message from unauthorized user",
+		// Record unauthorized error
+		errorAttrs := append(audioAttrs,
+			attribute.String("error_type", "unauthorized"),
+			attribute.String("error_category", "authorization"),
+		)
+		h.audioProcessingErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+		h.audioProcessingDuration.Record(ctx, time.Since(startTime).Seconds(), metric.WithAttributes(errorAttrs...))
+
+		h.logger.Warn("Unauthorized audio message attempt",
 			"user_id", user.TelegramID,
 			"chat_id", message.Chat.ID,
-			"message_id", message.MessageID)
+			"message_id", message.MessageID,
+			"processing_time_ms", time.Since(startTime).Milliseconds(),
+			"component", "audio_processing",
+			"error_category", "unauthorized")
 		return
 	}
 
@@ -149,6 +288,15 @@ func (h *CoreMessageHandler) HandleAudioMessage(ctx context.Context, message *tg
 		fileSize = message.Voice.FileSize
 		mimeType = message.Voice.MimeType
 		fileName = fmt.Sprintf("voice_%d.ogg", message.MessageID)
+
+		// Update audio type in metrics
+		audioAttrs = []attribute.KeyValue{
+			attribute.String("user_id", fmt.Sprintf("%d", user.TelegramID)),
+			attribute.Bool("authorized", user.IsAuthorized),
+			attribute.String("audio_type", audioType),
+			attribute.Int("duration_seconds", duration),
+			attribute.String("mime_type", mimeType),
+		}
 
 		h.logger.Info("🎤 Audio message detected - Voice Message",
 			"user_id", user.TelegramID,
@@ -177,6 +325,15 @@ func (h *CoreMessageHandler) HandleAudioMessage(ctx context.Context, message *tg
 		fileName = message.Audio.FileName
 		if fileName == "" {
 			fileName = fmt.Sprintf("audio_%d.mp3", message.MessageID)
+		}
+
+		// Update audio type in metrics
+		audioAttrs = []attribute.KeyValue{
+			attribute.String("user_id", fmt.Sprintf("%d", user.TelegramID)),
+			attribute.Bool("authorized", user.IsAuthorized),
+			attribute.String("audio_type", audioType),
+			attribute.Int("duration_seconds", duration),
+			attribute.String("mime_type", mimeType),
 		}
 
 		h.logger.Info("🎤 Audio message detected - Audio File",
@@ -310,6 +467,14 @@ func (h *CoreMessageHandler) HandleAudioMessage(ctx context.Context, message *tg
 
 		sttResp, err := h.sttService.ProcessAudio(sttCtx, sttReq)
 		if err != nil {
+			// Record STT error metrics
+			errorAttrs := append(audioAttrs,
+				attribute.String("error_type", "stt_failed"),
+				attribute.String("error_category", "transcription"),
+			)
+			h.audioProcessingErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+			h.audioProcessingDuration.Record(ctx, time.Since(startTime).Seconds(), metric.WithAttributes(errorAttrs...))
+
 			h.logger.Error("❌ Failed to transcribe audio",
 				"error", err,
 				"user_id", user.TelegramID,
@@ -418,24 +583,57 @@ func (h *CoreMessageHandler) HandleAudioMessage(ctx context.Context, message *tg
 		// Restore original user locale after processing
 		user.User.Locale = originalLocale
 
-		h.logger.Info("✅ Audio message processing completed",
+		// Calculate comprehensive metrics
+		totalProcessingTime := time.Since(startTime)
+
+		// Record successful audio processing metrics
+		successAttrs := append(audioAttrs,
+			attribute.String("outcome", "success"),
+			attribute.String("detected_language", detectedLanguage),
+			attribute.Int("transcription_length", len(sttResp.RawText)),
+			attribute.Float64("processing_efficiency", float64(duration*1000)/float64(totalProcessingTime.Milliseconds())),
+		)
+		h.audioProcessingDuration.Record(ctx, totalProcessingTime.Seconds(), metric.WithAttributes(successAttrs...))
+
+		h.logger.Info("✅ Audio message processing completed successfully",
 			"user_id", user.TelegramID,
 			"audio_type", audioType,
+			"audio_duration_seconds", duration,
+			"audio_file_size_bytes", fileSize,
+			"audio_mime_type", mimeType,
 			"transcription", sttResp.RawText,
+			"transcription_length", len(sttResp.RawText),
 			"whisper_detected_language", detectedLanguage,
 			"restored_locale", originalLocale,
+			"total_processing_time_ms", totalProcessingTime.Milliseconds(),
+			"processing_efficiency", float64(duration*1000)/float64(totalProcessingTime.Milliseconds()), // audio_seconds_per_processing_second
+			"component", "audio_processing",
+			"outcome", "success",
 			"step", "processing_complete")
 	} else {
-		h.logger.Warn("⚠️ STT service not available",
+		totalProcessingTime := time.Since(startTime)
+
+		h.logger.Error("⚠️ STT service not available - audio message failed",
 			"user_id", user.TelegramID,
 			"audio_type", audioType,
+			"audio_duration_seconds", duration,
+			"audio_file_size_bytes", fileSize,
+			"audio_mime_type", mimeType,
+			"total_processing_time_ms", totalProcessingTime.Milliseconds(),
+			"component", "audio_processing",
+			"error_category", "stt_unavailable",
+			"outcome", "failed",
 			"step", "stt_unavailable")
 
 		// Send message about STT service unavailability
 		unavailableMsg := "🎤 Voice message processing is temporarily unavailable. Please send a text message instead."
 		msg := tgbotapi.NewMessage(message.Chat.ID, unavailableMsg)
 		if _, err := h.bot.Send(msg); err != nil {
-			h.logger.Error("Failed to send STT unavailable message", "error", err)
+			h.logger.Error("Failed to send STT unavailable message",
+				"error", err,
+				"user_id", user.TelegramID,
+				"component", "audio_processing",
+				"error_category", "notification_send_failed")
 		}
 	}
 }

@@ -8,6 +8,10 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // DocumentIntelligenceService handles Azure Document Intelligence API operations
@@ -17,6 +21,15 @@ type DocumentIntelligenceService struct {
 	apiVersion string
 	model      string
 	httpClient *http.Client
+
+	// Metrics
+	analyzeRequestsTotal     metric.Int64Counter
+	analyzeRequestDuration   metric.Float64Histogram
+	analyzeRequestErrors     metric.Int64Counter
+	apiRequestsTotal         metric.Int64Counter
+	apiRequestDuration       metric.Float64Histogram
+	apiRequestErrors         metric.Int64Counter
+	confidenceScoreHistogram metric.Float64Histogram
 }
 
 // ReceiptItem represents an item extracted from a receipt
@@ -113,6 +126,51 @@ type currencyValue struct {
 
 // NewDocumentIntelligenceService creates a new Document Intelligence service client
 func NewDocumentIntelligenceService(endpoint, apiKey, apiVersion, model string) *DocumentIntelligenceService {
+	meter := otel.Meter("azure_document_intelligence")
+
+	// Initialize metrics
+	analyzeRequestsTotal, _ := meter.Int64Counter(
+		"azure_document_intelligence_analyze_requests_total",
+		metric.WithDescription("Total number of document analysis requests"),
+		metric.WithUnit("1"),
+	)
+
+	analyzeRequestDuration, _ := meter.Float64Histogram(
+		"azure_document_intelligence_analyze_duration_seconds",
+		metric.WithDescription("Duration of document analysis requests"),
+		metric.WithUnit("s"),
+	)
+
+	analyzeRequestErrors, _ := meter.Int64Counter(
+		"azure_document_intelligence_analyze_errors_total",
+		metric.WithDescription("Total number of document analysis errors"),
+		metric.WithUnit("1"),
+	)
+
+	apiRequestsTotal, _ := meter.Int64Counter(
+		"azure_document_intelligence_api_requests_total",
+		metric.WithDescription("Total number of API requests to Azure Document Intelligence"),
+		metric.WithUnit("1"),
+	)
+
+	apiRequestDuration, _ := meter.Float64Histogram(
+		"azure_document_intelligence_api_duration_seconds",
+		metric.WithDescription("Duration of API requests to Azure Document Intelligence"),
+		metric.WithUnit("s"),
+	)
+
+	apiRequestErrors, _ := meter.Int64Counter(
+		"azure_document_intelligence_api_errors_total",
+		metric.WithDescription("Total number of API errors from Azure Document Intelligence"),
+		metric.WithUnit("1"),
+	)
+
+	confidenceScoreHistogram, _ := meter.Float64Histogram(
+		"azure_document_intelligence_confidence_score",
+		metric.WithDescription("Confidence scores from Azure Document Intelligence"),
+		metric.WithUnit("1"),
+	)
+
 	return &DocumentIntelligenceService{
 		endpoint:   endpoint,
 		apiKey:     apiKey,
@@ -121,24 +179,80 @@ func NewDocumentIntelligenceService(endpoint, apiKey, apiVersion, model string) 
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+
+		// Metrics
+		analyzeRequestsTotal:     analyzeRequestsTotal,
+		analyzeRequestDuration:   analyzeRequestDuration,
+		analyzeRequestErrors:     analyzeRequestErrors,
+		apiRequestsTotal:         apiRequestsTotal,
+		apiRequestDuration:       apiRequestDuration,
+		apiRequestErrors:         apiRequestErrors,
+		confidenceScoreHistogram: confidenceScoreHistogram,
 	}
 }
 
 func (dis *DocumentIntelligenceService) AnalyzeReceipt(ctx context.Context, imageData []byte, contentType string) (*ReceiptData, error) {
+	startTime := time.Now()
+
+	// Record analyze request metrics
+	attrs := []attribute.KeyValue{
+		attribute.String("model", dis.model),
+		attribute.String("content_type", contentType),
+		attribute.Int("image_size_bytes", len(imageData)),
+		attribute.String("operation", "analyze_receipt"),
+	}
+	dis.analyzeRequestsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
+
 	operationLocation, err := dis.startAnalysis(ctx, imageData, contentType)
 	if err != nil {
+		// Record analyze error
+		errorAttrs := append(attrs,
+			attribute.String("error_type", fmt.Sprintf("%T", err)),
+			attribute.String("error_stage", "start_analysis"),
+		)
+		dis.analyzeRequestErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+		dis.analyzeRequestDuration.Record(ctx, time.Since(startTime).Seconds(), metric.WithAttributes(errorAttrs...))
+
 		return nil, fmt.Errorf("failed to start analysis: %w", err)
 	}
 
 	result, err := dis.pollForResults(ctx, operationLocation)
 	if err != nil {
+		// Record polling error
+		errorAttrs := append(attrs,
+			attribute.String("error_type", fmt.Sprintf("%T", err)),
+			attribute.String("error_stage", "poll_results"),
+		)
+		dis.analyzeRequestErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+		dis.analyzeRequestDuration.Record(ctx, time.Since(startTime).Seconds(), metric.WithAttributes(errorAttrs...))
+
 		return nil, fmt.Errorf("failed to get analysis results: %w", err)
 	}
 
 	receiptData, err := dis.parseReceiptResponse(result)
 	if err != nil {
+		// Record parsing error
+		errorAttrs := append(attrs,
+			attribute.String("error_type", fmt.Sprintf("%T", err)),
+			attribute.String("error_stage", "parse_response"),
+		)
+		dis.analyzeRequestErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+		dis.analyzeRequestDuration.Record(ctx, time.Since(startTime).Seconds(), metric.WithAttributes(errorAttrs...))
+
 		return nil, fmt.Errorf("failed to parse receipt data: %w", err)
 	}
+
+	// Record success metrics
+	duration := time.Since(startTime)
+	successAttrs := append(attrs,
+		attribute.String("outcome", "success"),
+		attribute.Float64("confidence", receiptData.Confidence),
+		attribute.Int("items_extracted", len(receiptData.Items)),
+		attribute.String("merchant_name", receiptData.MerchantName),
+		attribute.String("currency", receiptData.Currency),
+	)
+	dis.analyzeRequestDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(successAttrs...))
+	dis.confidenceScoreHistogram.Record(ctx, receiptData.Confidence, metric.WithAttributes(successAttrs...))
 
 	return receiptData, nil
 }
@@ -157,14 +271,43 @@ func (dis *DocumentIntelligenceService) startAnalysis(ctx context.Context, image
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Ocp-Apim-Subscription-Key", dis.apiKey)
 
+	// Record API request metrics
+	apiStartTime := time.Now()
+	apiAttrs := []attribute.KeyValue{
+		attribute.String("endpoint", "analyze"),
+		attribute.String("method", "POST"),
+		attribute.String("model", dis.model),
+		attribute.String("api_version", dis.apiVersion),
+	}
+	dis.apiRequestsTotal.Add(ctx, 1, metric.WithAttributes(apiAttrs...))
+
 	resp, err := dis.httpClient.Do(req)
+	apiDuration := time.Since(apiStartTime)
+	dis.apiRequestDuration.Record(ctx, apiDuration.Seconds(), metric.WithAttributes(apiAttrs...))
+
 	if err != nil {
+		// Record API error
+		errorAttrs := append(apiAttrs,
+			attribute.String("error_type", fmt.Sprintf("%T", err)),
+			attribute.String("error_category", "http_request"),
+		)
+		dis.apiRequestErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+
 		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusAccepted {
 		bodyBytes, _ := io.ReadAll(resp.Body)
+
+		// Record API error for non-202 status
+		errorAttrs := append(apiAttrs,
+			attribute.String("error_type", "api_error"),
+			attribute.String("error_category", "status_error"),
+			attribute.Int("status_code", resp.StatusCode),
+		)
+		dis.apiRequestErrors.Add(ctx, 1, metric.WithAttributes(errorAttrs...))
+
 		return "", fmt.Errorf("analysis request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 

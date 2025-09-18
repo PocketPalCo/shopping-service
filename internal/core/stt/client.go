@@ -21,6 +21,12 @@ var tracer = otel.Tracer("stt-client")
 type Client struct {
 	subscriptionKey string
 	region          string
+
+	// Metrics
+	processRequestsTotal   api.Int64Counter
+	processRequestDuration api.Float64Histogram
+	processRequestErrors   api.Int64Counter
+	audioLengthHistogram   api.Float64Histogram
 }
 
 type STTRequest struct {
@@ -42,13 +48,63 @@ type STTResponse struct {
 }
 
 func NewClient(subscriptionKey, region string) *Client {
+	meter := otel.Meter("azure_speech_service")
+
+	// Initialize metrics
+	processRequestsTotal, _ := meter.Int64Counter(
+		"azure_speech_process_requests_total",
+		api.WithDescription("Total number of speech-to-text processing requests"),
+		api.WithUnit("1"),
+	)
+
+	processRequestDuration, _ := meter.Float64Histogram(
+		"azure_speech_process_duration_seconds",
+		api.WithDescription("Duration of speech-to-text processing requests"),
+		api.WithUnit("s"),
+	)
+
+	processRequestErrors, _ := meter.Int64Counter(
+		"azure_speech_process_errors_total",
+		api.WithDescription("Total number of speech-to-text processing errors"),
+		api.WithUnit("1"),
+	)
+
+	audioLengthHistogram, _ := meter.Float64Histogram(
+		"azure_speech_audio_length_seconds",
+		api.WithDescription("Length of audio files processed"),
+		api.WithUnit("s"),
+	)
+
 	return &Client{
 		subscriptionKey: subscriptionKey,
 		region:          region,
+
+		// Metrics
+		processRequestsTotal:   processRequestsTotal,
+		processRequestDuration: processRequestDuration,
+		processRequestErrors:   processRequestErrors,
+		audioLengthHistogram:   audioLengthHistogram,
 	}
 }
 
 func (c *Client) ProcessAudio(ctx context.Context, req STTRequest) (*STTResponse, error) {
+	startTime := time.Now()
+
+	// Record processing request metrics
+	attrs := []attribute.KeyValue{
+		attribute.String("session_id", req.SessionID),
+		attribute.Int("chunk_id", req.ChunkID),
+		attribute.String("language", req.Language),
+		attribute.String("target_language", req.TargetLanguage),
+		attribute.Int("audio_size_bytes", len(req.AudioData)),
+		attribute.String("filename", req.Filename),
+	}
+	c.processRequestsTotal.Add(ctx, 1, api.WithAttributes(attrs...))
+
+	// Record audio length (estimated from size - rough approximation)
+	estimatedAudioLength := float64(len(req.AudioData)) / 16000.0 // Assuming 16kHz mono
+	c.audioLengthHistogram.Record(ctx, estimatedAudioLength, api.WithAttributes(attrs...))
+
 	// If no language specified, try common languages in order of likelihood
 	languages := []string{req.Language}
 	if req.Language == "" {
@@ -63,7 +119,16 @@ func (c *Client) ProcessAudio(ctx context.Context, req STTRequest) (*STTResponse
 
 		result, err := c.processAudioWithLanguage(ctx, req, lang)
 		if err == nil && result != nil && result.RawText != "" {
-			// Successful recognition
+			// Successful recognition - record success metrics
+			duration := time.Since(startTime)
+			successAttrs := append(attrs,
+				attribute.String("outcome", "success"),
+				attribute.String("detected_language", result.DetectedLanguage),
+				attribute.Int("text_length", len(result.RawText)),
+				attribute.Float64("processing_time_s", result.ProcessingTimeS),
+			)
+			c.processRequestDuration.Record(ctx, duration.Seconds(), api.WithAttributes(successAttrs...))
+
 			return result, nil
 		}
 
@@ -78,6 +143,15 @@ func (c *Client) ProcessAudio(ctx context.Context, req STTRequest) (*STTResponse
 	}
 
 	// All languages failed, return error
+	duration := time.Since(startTime)
+	errorAttrs := append(attrs,
+		attribute.String("outcome", "failed"),
+		attribute.String("error_type", "recognition_failed"),
+		attribute.String("error_category", "no_languages_matched"),
+	)
+	c.processRequestErrors.Add(ctx, 1, api.WithAttributes(errorAttrs...))
+	c.processRequestDuration.Record(ctx, duration.Seconds(), api.WithAttributes(errorAttrs...))
+
 	return nil, fmt.Errorf("speech recognition failed for all attempted languages")
 }
 
