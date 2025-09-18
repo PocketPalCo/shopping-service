@@ -116,7 +116,7 @@ func (c *Client) ProcessAudio(ctx context.Context, req STTRequest) (*STTResponse
 	var lastError error
 	var failedLanguages []string
 
-	for i, lang := range languages {
+	for _, lang := range languages {
 		if lang == "" {
 			continue
 		}
