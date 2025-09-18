@@ -108,22 +108,13 @@ jobs:
             echo "❌ No migration files found"
             exit 1
           fi
-          echo "=== Debug Database Configuration ==="
-          echo "DB_HOST: ${{ vars.SSV_DB_HOST }}"
-          echo "DB_PORT: ${{ vars.SSV_DB_PORT }}"
-          echo "DB_DATABASE: ${{ vars.SSV_DB_DATABASE }}"
-          echo "DB_SSL: ${{ vars.SSV_DB_SSL }}"
-          echo "DB_USER: [REDACTED]"
-          echo "DB_PASSWORD: [REDACTED]"
-          echo "========================================"
 
           DB_URL="postgresql://${{ secrets.SSV_DB_USER }}:${{ secrets.SSV_DB_PASSWORD }}@${{ vars.SSV_DB_HOST }}:${{ vars.SSV_DB_PORT }}/${{ vars.SSV_DB_DATABASE }}?sslmode=${{ vars.SSV_DB_SSL }}"
           echo "Testing database connection..."
-          echo "Connection string: postgresql://${{ secrets.SSV_DB_USER }}:[REDACTED]@${{ vars.SSV_DB_HOST }}:${{ vars.SSV_DB_PORT }}/${{ vars.SSV_DB_DATABASE }}?sslmode=${{ vars.SSV_DB_SSL }}"
 
           VERSION_OUTPUT=$(migrate -path migrations -database "$DB_URL" version 2>&1)
           if echo "$VERSION_OUTPUT" | grep -q "no migration"; then
-            echo "✅ Database connected successfully (no migrations table yet - this is normal for first run)"
+            echo "✅ Database connected successfully"
           elif echo "$VERSION_OUTPUT" | grep -q "error"; then
             echo "❌ Cannot connect to database: $VERSION_OUTPUT"
             exit 1
