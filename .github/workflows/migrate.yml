@@ -48,7 +48,12 @@ jobs:
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           if ! command -v migrate &> /dev/null; then
             echo "Installing migrate tool..."
-            curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz | tar xvz
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "aarch64" ]; then
+              curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-arm64.tar.gz | tar xvz
+            else
+              curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz | tar xvz
+            fi
             mv migrate /usr/local/bin/migrate
             chmod +x /usr/local/bin/migrate
           fi

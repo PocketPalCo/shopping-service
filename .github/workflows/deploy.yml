@@ -41,8 +41,14 @@ jobs:
       run: |
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           if ! command -v go &> /dev/null; then
-            wget https://go.dev/dl/go1.25.1.linux-amd64.tar.gz
-            tar -C /usr/local -xzf go1.25.1.linux-amd64.tar.gz
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "aarch64" ]; then
+              wget https://go.dev/dl/go1.25.1.linux-arm64.tar.gz
+              tar -C /usr/local -xzf go1.25.1.linux-arm64.tar.gz
+            else
+              wget https://go.dev/dl/go1.25.1.linux-amd64.tar.gz
+              tar -C /usr/local -xzf go1.25.1.linux-amd64.tar.gz
+            fi
             echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
           fi
           echo "Dependencies ready"
