@@ -730,8 +730,29 @@ func (s *Service) storeCachedTranslation(ctx context.Context, item string, targe
 	itemHash := s.hashItem(item)
 	normalized := s.normalizeItem(item)
 
-	// Serialize AI response to JSON
-	aiResponseBytes, err := json.Marshal(result)
+	// Find the specific translation for this item in the batch result
+	var itemTranslation *ReceiptItemTranslation
+	for _, translation := range result.Translations {
+		if s.normalizeItem(translation.OriginalText) == normalized {
+			itemTranslation = &translation
+			break
+		}
+	}
+
+	if itemTranslation == nil {
+		return fmt.Errorf("translation not found for item '%s' in batch result", item)
+	}
+
+	// Create individual translation result for this specific item
+	individualResult := &BatchTranslationResult{
+		DetectedLanguage: result.DetectedLanguage,
+		TargetLanguage:   result.TargetLanguage,
+		Translations:     []ReceiptItemTranslation{*itemTranslation},
+		Confidence:       itemTranslation.Confidence, // Use item-specific confidence
+	}
+
+	// Serialize individual AI response to JSON
+	aiResponseBytes, err := json.Marshal(individualResult)
 	if err != nil {
 		return fmt.Errorf("failed to serialize AI response: %w", err)
 	}
@@ -750,8 +771,8 @@ func (s *Service) storeCachedTranslation(ctx context.Context, item string, targe
 	}
 
 	var confidence *float64
-	if result.Confidence > 0 {
-		confidence = &result.Confidence
+	if itemTranslation.Confidence > 0 {
+		confidence = &itemTranslation.Confidence
 	}
 
 	_, err = s.db.Exec(ctx, query, normalized, itemHash, targetLocale, string(aiResponseBytes), detectedLang, confidence)
@@ -759,6 +780,10 @@ func (s *Service) storeCachedTranslation(ctx context.Context, item string, targe
 		return fmt.Errorf("failed to store cached translation: %w", err)
 	}
 
-	s.logger.Debug("Stored translation in cache", "item", item, "target_locale", targetLocale)
+	s.logger.Debug("Stored individual translation in cache",
+		"item", item,
+		"target_locale", targetLocale,
+		"translated_text", itemTranslation.TranslatedText,
+		"confidence", itemTranslation.Confidence)
 	return nil
 }

@@ -1,0 +1,37 @@
+services:
+  postgres:
+    container_name: shopping-service-db
+    image: "postgres:16-alpine"
+    environment:
+      POSTGRES_USER: ${SSV_DB_USER}
+      POSTGRES_PASSWORD: ${SSV_DB_PASSWORD}
+      POSTGRES_DB: ${SSV_DB_DATABASE}
+    ports:
+      - "${SSV_DB_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SSV_DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    container_name: shopping-service-redis
+    image: "redis:7-alpine"
+    ports:
+      - "${SSV_REDIS_PORT}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${SSV_REDIS_PASS}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${SSV_REDIS_PASS}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

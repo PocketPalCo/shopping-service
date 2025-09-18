@@ -60,8 +60,9 @@ type Config struct {
 	OpenAIStore           bool    `mapstructure:"SSV_OPENAI_STORE"`
 	OpenAIReasoningEffort string  `mapstructure:"SSV_OPENAI_REASONING_EFFORT"`
 
-	// STT Service Configuration
-	STTServiceURL string `mapstructure:"SSV_STT_SERVICE_URL"`
+	// Azure Speech Service Configuration
+	AzureSpeechKey    string `mapstructure:"SSV_AZURE_SPEECH_KEY"`
+	AzureSpeechRegion string `mapstructure:"SSV_AZURE_SPEECH_REGION"`
 
 	// Cloud Storage Configuration
 	CloudProvider                string `mapstructure:"SSV_CLOUD_PROVIDER"`
@@ -126,8 +127,9 @@ func DefaultConfig() Config {
 		OpenAIStore:           true,
 		OpenAIReasoningEffort: "medium",
 
-		// STT service defaults
-		STTServiceURL: "http://localhost:8000",
+		// Azure Speech service defaults
+		AzureSpeechKey:    "",
+		AzureSpeechRegion: "eastus",
 
 		// Cloud storage defaults
 		CloudProvider:                "azure",
@@ -204,7 +206,8 @@ func ConfigFromEnvironment() (config Config, err error) {
 	viper.SetDefault("SSV_OPENAI_USE_RESPONSES_API", config.OpenAIUseResponsesAPI)
 	viper.SetDefault("SSV_OPENAI_STORE", config.OpenAIStore)
 	viper.SetDefault("SSV_OPENAI_REASONING_EFFORT", config.OpenAIReasoningEffort)
-	viper.SetDefault("SSV_STT_SERVICE_URL", config.STTServiceURL)
+	viper.SetDefault("SSV_AZURE_SPEECH_KEY", config.AzureSpeechKey)
+	viper.SetDefault("SSV_AZURE_SPEECH_REGION", config.AzureSpeechRegion)
 	viper.SetDefault("SSV_CLOUD_PROVIDER", config.CloudProvider)
 	viper.SetDefault("SSV_AZURE_STORAGE_CONNECTION_STRING", config.AzureStorageConnectionString)
 	viper.SetDefault("SSV_AZURE_STORAGE_ACCOUNT_NAME", config.AzureStorageAccountName)

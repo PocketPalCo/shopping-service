@@ -1,0 +1,176 @@
+name: Run Database Migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to migrate'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+      direction:
+        description: 'Migration direction'
+        required: true
+        default: 'up'
+        type: choice
+        options:
+          - up
+          - down
+      steps:
+        description: 'Number of steps (for down migrations only)'
+        required: false
+        default: '1'
+        type: string
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup SSH Agent
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.HETZNER_SSH_PRIVATE_KEY }}
+
+    - name: Add Hetzner server to known hosts
+      run: |
+        ssh-keyscan -H ${{ secrets.HETZNER_SERVER_IP }} >> ~/.ssh/known_hosts
+
+    - name: Install migrate tool on server
+      run: |
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
+          if ! command -v migrate &> /dev/null; then
+            echo "Installing migrate tool..."
+            curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz | tar xvz
+            mv migrate /usr/local/bin/migrate
+            chmod +x /usr/local/bin/migrate
+          fi
+          migrate -version
+        EOF
+
+    - name: Copy migration files
+      run: |
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} "mkdir -p /opt/shopping-service/migrations"
+        scp -r migrations/* root@${{ secrets.HETZNER_SERVER_IP }}:/opt/shopping-service/migrations/
+
+    - name: Run database migrations
+      run: |
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
+          cd /opt/shopping-service
+
+          # Check if migrations directory exists
+          if [ ! -d "migrations" ]; then
+            echo "❌ No migrations directory found"
+            exit 1
+          fi
+
+          # Count migration files
+          MIGRATION_COUNT=$(find migrations -name "*.sql" | wc -l)
+          echo "Found $MIGRATION_COUNT migration files"
+
+          if [ $MIGRATION_COUNT -eq 0 ]; then
+            echo "❌ No migration files found"
+            exit 1
+          fi
+
+          # Build database URL
+          DB_URL="postgresql://postgres:${{ secrets.DB_PASSWORD }}@localhost:5432/pocket-pal?sslmode=disable"
+
+          # Test database connection
+          echo "Testing database connection..."
+          if ! migrate -path migrations -database "$DB_URL" version &>/dev/null; then
+            echo "❌ Cannot connect to database. Make sure PostgreSQL is running."
+            exit 1
+          fi
+
+          # Show current migration version
+          echo "Current migration version:"
+          migrate -path migrations -database "$DB_URL" version
+
+          # Run migrations based on direction
+          if [ "${{ github.event.inputs.direction }}" = "up" ]; then
+            echo "🔄 Running UP migrations..."
+            migrate -path migrations -database "$DB_URL" up
+          elif [ "${{ github.event.inputs.direction }}" = "down" ]; then
+            STEPS="${{ github.event.inputs.steps }}"
+            echo "🔄 Running DOWN migrations ($STEPS steps)..."
+            migrate -path migrations -database "$DB_URL" down $STEPS
+          fi
+
+          # Show final migration version
+          echo "Final migration version:"
+          migrate -path migrations -database "$DB_URL" version
+
+          echo "✅ Migration completed successfully!"
+        EOF
+
+    - name: Verify migration result
+      run: |
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
+          cd /opt/shopping-service
+
+          DB_URL="postgresql://postgres:${{ secrets.DB_PASSWORD }}@localhost:5432/pocket-pal?sslmode=disable"
+
+          echo "=== Migration Status ==="
+          migrate -path migrations -database "$DB_URL" version
+
+          echo ""
+          echo "=== Database Tables ==="
+          docker exec shopping-service-db psql -U postgres -d pocket-pal -c "\dt" || echo "Could not list tables"
+
+          echo ""
+          echo "=== Migration History ==="
+          docker exec shopping-service-db psql -U postgres -d pocket-pal -c "SELECT version, dirty FROM schema_migrations ORDER BY version;" || echo "No migration history table"
+        EOF
+
+    - name: Create migration summary
+      run: |
+        cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+        ## 🗃️ Database Migration
+
+        **Environment**: ${{ github.event.inputs.environment || 'production' }}
+        **Direction**: ${{ github.event.inputs.direction }}
+        **Steps**: ${{ github.event.inputs.steps }}
+        **Server**: ${{ secrets.HETZNER_SERVER_IP }}
+        **Commit**: ${{ github.sha }}
+
+        ### Migration Details:
+        - **Database**: pocket-pal
+        - **Migration Path**: `/opt/shopping-service/migrations`
+        - **Connection**: PostgreSQL via localhost:5432
+
+        ### 🔧 Manual Commands:
+        ```bash
+        # SSH to server
+        ssh root@${{ secrets.HETZNER_SERVER_IP }}
+        cd /opt/shopping-service
+
+        # Check current version
+        migrate -path migrations -database "postgresql://postgres:PASSWORD@localhost:5432/pocket-pal?sslmode=disable" version
+
+        # Run migrations manually
+        migrate -path migrations -database "postgresql://postgres:PASSWORD@localhost:5432/pocket-pal?sslmode=disable" up
+        ```
+
+        **Migration Status**: ✅ Complete
+        EOF
+
+  notify:
+    needs: migrate
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Notify migration result
+      run: |
+        if [ "${{ needs.migrate.result }}" == "success" ]; then
+          echo "✅ Database migration (${{ github.event.inputs.direction }}) completed successfully"
+        else
+          echo "❌ Database migration failed"
+        fi

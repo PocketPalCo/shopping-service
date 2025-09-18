@@ -94,7 +94,7 @@ func NewTelegramService(cfg *config.Config, db *pgxpool.Pool, logger *slog.Logge
 	receiptsService := receipts.NewService(db, cloudService, aiService, logger)
 
 	// Initialize STT client
-	sttClient := stt.NewClient(cfg.STTServiceURL)
+	sttClient := stt.NewClient(cfg.AzureSpeechKey, cfg.AzureSpeechRegion)
 
 	botService, err := NewBotService(cfg.TelegramBotToken, usersService, familiesService, shoppingService, receiptsService, sttClient, logger, cfg.TelegramDebug)
 	if err != nil {

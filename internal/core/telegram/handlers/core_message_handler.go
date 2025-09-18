@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/PocketPalCo/shopping-service/internal/core/stt"
 	"github.com/PocketPalCo/shopping-service/internal/core/telegram/commands"
@@ -116,6 +117,15 @@ func (h *CoreMessageHandler) HandleTextMessage(ctx context.Context, message *tgb
 
 // HandleAudioMessage processes voice messages
 func (h *CoreMessageHandler) HandleAudioMessage(ctx context.Context, message *tgbotapi.Message, user *InternalUser) {
+	// Add panic recovery to prevent crashing the bot
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Error("❌ Panic in HandleAudioMessage",
+				"panic", r,
+				"user_id", user.TelegramID,
+				"message_id", message.MessageID)
+		}
+	}()
 	if !user.IsAuthorized {
 		h.logger.Debug("Ignoring audio message from unauthorized user",
 			"user_id", user.TelegramID,
@@ -271,13 +281,18 @@ func (h *CoreMessageHandler) HandleAudioMessage(ctx context.Context, message *tg
 			"audio_type", audioType,
 			"step", "stt_start")
 
-		// Create STT request without language parameters (let STT service auto-detect)
+		// Create STT request with automatic language detection
 		sessionID := fmt.Sprintf("telegram_%d_%d", user.TelegramID, message.MessageID)
+
+		// Use empty language to enable auto-detection in Azure Speech SDK
+		// This allows users to speak in any supported language regardless of their locale
 		sttReq := stt.STTRequest{
-			SessionID: sessionID,
-			ChunkID:   1,
-			AudioData: audioData,
-			Filename:  fileName,
+			SessionID:      sessionID,
+			ChunkID:        1,
+			Language:       "", // Empty for auto-detection
+			TargetLanguage: "", // Empty for auto-detection
+			AudioData:      audioData,
+			Filename:       fileName,
 		}
 
 		h.logger.Info("🔄 Sending to STT service",
@@ -289,7 +304,11 @@ func (h *CoreMessageHandler) HandleAudioMessage(ctx context.Context, message *tg
 			"language_detection", "auto",
 			"step", "stt_request")
 
-		sttResp, err := h.sttService.ProcessAudio(ctx, sttReq)
+		// Create a timeout context for STT processing
+		sttCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		sttResp, err := h.sttService.ProcessAudio(sttCtx, sttReq)
 		if err != nil {
 			h.logger.Error("❌ Failed to transcribe audio",
 				"error", err,

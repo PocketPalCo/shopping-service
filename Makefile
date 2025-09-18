@@ -1,3 +1,9 @@
+# Set up Azure Speech SDK environment
+export SPEECHSDK_ROOT := $(HOME)/SpeechSDK
+export CGO_CFLAGS := -I$(SPEECHSDK_ROOT)/include/c_api
+export CGO_LDFLAGS := -L$(SPEECHSDK_ROOT)/lib/x64 -lMicrosoft.CognitiveServices.Speech.core
+export LD_LIBRARY_PATH := $(SPEECHSDK_ROOT)/lib/x64:$(LD_LIBRARY_PATH)
+
 unit-test:
 	go test -timeout 9000s -a -v -coverprofile=coverage.out -coverpkg=./... ./... 2>&1 | tee report.out
 unit-test-ci:
@@ -5,7 +11,7 @@ unit-test-ci:
 mock:
 	go generate ./...
 dev:
-	air -c .air.toml
+	./dev-with-azure-speech.sh go run cmd/main.go
 
 vet:
 	go vet ./...

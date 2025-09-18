@@ -1,8 +1,39 @@
-# Build stage
-FROM golang:1.24-alpine AS builder
+# Build stage - use latest Go and install 1.25.1
+FROM debian:bullseye AS builder
 
-# Install build dependencies
-RUN apk add --no-cache git ca-certificates tzdata
+# Install build dependencies for Azure Speech SDK and Go
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    ca-certificates \
+    libasound2-dev \
+    libssl-dev \
+    wget \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go 1.25.1
+ENV GO_VERSION=1.25.1
+RUN wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz && \
+    rm go${GO_VERSION}.linux-amd64.tar.gz
+
+# Set Go environment
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/go"
+ENV PATH="${GOPATH}/bin:${PATH}"
+
+# Download and install Azure Speech SDK C++ library
+ENV SPEECHSDK_ROOT="/usr/local/SpeechSDK"
+RUN mkdir -p "$SPEECHSDK_ROOT" && \
+    wget -O SpeechSDK-Linux.tar.gz https://aka.ms/csspeech/linuxbinary && \
+    tar --strip 1 -xzf SpeechSDK-Linux.tar.gz -C "$SPEECHSDK_ROOT" && \
+    rm SpeechSDK-Linux.tar.gz
+
+# Set environment variables for Speech SDK
+ENV CGO_CFLAGS="-I$SPEECHSDK_ROOT/include/c_api"
+ENV CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/x64 -lMicrosoft.CognitiveServices.Speech.core"
+ENV LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/x64:$LD_LIBRARY_PATH"
 
 WORKDIR /app
 
@@ -13,17 +44,24 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags '-extldflags "-static"' -o shopping-service ./cmd
+# Build the application with CGO enabled for Speech SDK
+RUN CGO_ENABLED=1 GOOS=linux go build -o shopping-service ./cmd
 
-# Install wget for health checks
-RUN apk add --no-cache wget
+# Runtime stage
+FROM debian:bullseye-slim
 
-# Runtime stage  
-FROM alpine:latest
+# Install runtime dependencies for Azure Speech SDK
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libasound2 \
+    libssl1.1 \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install runtime dependencies
-RUN apk --no-cache add ca-certificates tzdata wget
+# Copy Speech SDK libraries from builder
+COPY --from=builder /usr/local/SpeechSDK/lib/x64 /usr/local/lib/
+RUN echo "/usr/local/lib" > /etc/ld.so.conf.d/speechsdk.conf && ldconfig
+
 RUN mkdir /app
 
 WORKDIR /app
@@ -35,8 +73,8 @@ COPY --from=builder /app/shopping-service .
 RUN mkdir -p logs
 
 # Create non-root user
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup
+RUN groupadd -g 1001 appgroup && \
+    useradd -u 1001 -g appgroup -m -s /bin/bash appuser
 
 # Change ownership
 RUN chown -R appuser:appgroup /app
