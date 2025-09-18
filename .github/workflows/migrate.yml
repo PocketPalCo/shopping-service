@@ -46,17 +46,39 @@ jobs:
     - name: Install migrate tool on server
       run: |
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
+          echo "Checking architecture: $(uname -m)"
+
+          # Remove existing migrate if it's wrong architecture
+          if command -v migrate &> /dev/null; then
+            if ! migrate -version &> /dev/null; then
+              echo "Removing corrupt migrate binary..."
+              rm -f /usr/local/bin/migrate
+            fi
+          fi
+
           if ! command -v migrate &> /dev/null; then
             echo "Installing migrate tool..."
             ARCH=$(uname -m)
+            echo "Detected architecture: $ARCH"
+
+            cd /tmp
             if [ "$ARCH" = "aarch64" ]; then
-              curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-arm64.tar.gz | tar xvz
+              echo "Downloading ARM64 migrate..."
+              curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-arm64.tar.gz -o migrate.tar.gz
             else
-              curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz | tar xvz
+              echo "Downloading AMD64 migrate..."
+              curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz -o migrate.tar.gz
             fi
+
+            tar -xzf migrate.tar.gz
             mv migrate /usr/local/bin/migrate
             chmod +x /usr/local/bin/migrate
+            rm -f migrate.tar.gz LICENSE README.md
+            cd -
           fi
+
+          echo "Testing migrate binary..."
+          file /usr/local/bin/migrate
           migrate -version
         EOF
 
