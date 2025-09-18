@@ -58,13 +58,13 @@ jobs:
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /opt/shopping-service
           cat > .env << 'ENV_EOF'
-          SSV_ENVIRONMENT=${{ vars.SSV_ENVIRONMENT }}
-          SSV_SERVER_BIND_ADDR=${{ vars.SSV_SERVER_BIND_ADDR }}
-          SSV_SERVER_READ_TIMEOUT=${{ vars.SSV_SERVER_READ_TIMEOUT }}
-          SSV_LOG_FORMAT=${{ vars.SSV_LOG_FORMAT }}
-          SSV_LOG_LEVEL=${{ vars.SSV_LOG_LEVEL }}
-          SSV_RATE_LIMIT_MAX=${{ vars.SSV_RATE_LIMIT_MAX }}
-          SSV_RATE_LIMIT_WINDOW=${{ vars.SSV_RATE_LIMIT_WINDOW }}
+          SSV_ENVIRONMENT=${{ vars.SSV_ENVIRONMENT || 'production' }}
+          SSV_SERVER_BIND_ADDR=${{ vars.SSV_SERVER_BIND_ADDR || '0.0.0.0:3009' }}
+          SSV_SERVER_READ_TIMEOUT=${{ vars.SSV_SERVER_READ_TIMEOUT || '60' }}
+          SSV_LOG_FORMAT=${{ vars.SSV_LOG_FORMAT || 'json' }}
+          SSV_LOG_LEVEL=${{ vars.SSV_LOG_LEVEL || 'info' }}
+          SSV_RATE_LIMIT_MAX=${{ vars.SSV_RATE_LIMIT_MAX || '1000' }}
+          SSV_RATE_LIMIT_WINDOW=${{ vars.SSV_RATE_LIMIT_WINDOW || '60' }}
           SSV_DB_HOST=${{ vars.SSV_DB_HOST }}
           SSV_DB_PORT=${{ vars.SSV_DB_PORT }}
           SSV_DB_SSL=${{ vars.SSV_DB_SSL }}
@@ -130,9 +130,19 @@ jobs:
           [Install]
           WantedBy=multi-user.target
           SERVICE_EOF
+          echo "=== Checking .env file (full content) ==="
+          cat .env
+          echo "=== Checking for malformed lines ==="
+          grep -n "^[^=]*$" .env || echo "No malformed lines found"
+          echo "=== Line count ==="
+          wc -l .env
+          echo "=== Checking systemd service file ==="
+          cat /etc/systemd/system/shopping-service.service
           systemctl daemon-reload
           systemctl enable shopping-service
-          systemctl restart shopping-service
+          systemctl start shopping-service
+          echo "=== Checking service status after start ==="
+          systemctl status shopping-service --no-pager || true
           echo "Deployment completed!"
         EOF
 
