@@ -37,7 +37,7 @@ jobs:
 
     - name: Setup environment on server
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << EOF
           cd /tmp
           # Copy example env if .env doesn't exist
           if [ ! -f .env ]; then
@@ -57,7 +57,7 @@ jobs:
     - name: Start databases
       if: github.event.inputs.action == 'up' || github.event.inputs.action == ''
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << EOF
           cd /tmp
           docker compose -f docker-compose.db.yml up -d
 
@@ -74,7 +74,7 @@ jobs:
     - name: Stop databases
       if: github.event.inputs.action == 'down'
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << EOF
           cd /tmp
           docker compose -f docker-compose.db.yml down -v
           echo "✅ Databases stopped and volumes removed!"
@@ -83,7 +83,7 @@ jobs:
     - name: Restart databases
       if: github.event.inputs.action == 'restart'
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << EOF
           cd /tmp
           docker compose -f docker-compose.db.yml restart
 
@@ -99,7 +99,7 @@ jobs:
 
     - name: Show database status
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << EOF
           cd /tmp
           echo "=== Database Container Status ==="
           docker compose -f docker-compose.db.yml ps
@@ -114,7 +114,7 @@ jobs:
     - name: Show logs on failure
       if: failure()
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << EOF
           cd /tmp
           echo "=== PostgreSQL Logs ==="
           docker compose -f docker-compose.db.yml logs postgres
