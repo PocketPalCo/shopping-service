@@ -135,16 +135,16 @@ jobs:
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /opt/shopping-service
           export PATH=$PATH:/usr/local/go/bin
-          systemctl stop shopping-service || true
-          docker compose -f docker-compose.prod.yml down || true
-          docker compose -f docker-compose.prod.yml up -d
-          echo "Waiting for database to be ready..."
-          sleep 15
           echo "Building shopping service..."
           go mod tidy
-          go build -o shopping-service cmd/main.go
-          systemctl daemon-reload
-          systemctl restart shopping-service
+          if go build -o shopping-service cmd/main.go; then
+            echo "✅ Build successful, restarting service..."
+            systemctl daemon-reload
+            systemctl restart shopping-service
+          else
+            echo "❌ Build failed, service not restarted"
+            exit 1
+          fi
           echo "=== Checking service status after start ==="
           systemctl status shopping-service --no-pager || true
           echo "Deployment completed!"
