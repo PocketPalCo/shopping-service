@@ -106,7 +106,7 @@ jobs:
             echo "❌ No migration files found"
             exit 1
           fi
-          DB_URL="postgresql://${{ secrets.SSV_DB_USER }}:${{ secrets.SSV_DB_PASSWORD }}@${{ secrets.SSV_DB_HOST }}:${{ secrets.SSV_DB_PORT }}/${{ secrets.SSV_DB_DATABASE }}?sslmode=${{ secrets.SSV_DB_SSL }}"
+          DB_URL="postgresql://${{ secrets.SSV_DB_USER }}:${{ secrets.SSV_DB_PASSWORD }}@${{ vars.SSV_DB_HOST }}:${{ vars.SSV_DB_PORT }}/${{ vars.SSV_DB_DATABASE }}?sslmode=${{ vars.SSV_DB_SSL }}"
           echo "Testing database connection..."
           if ! migrate -path migrations -database "$DB_URL" version &>/dev/null; then
             echo "❌ Cannot connect to database. Make sure PostgreSQL is running."
@@ -131,7 +131,7 @@ jobs:
       run: |
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /opt/shopping-service
-          DB_URL="postgresql://${{ secrets.SSV_DB_USER }}:${{ secrets.SSV_DB_PASSWORD }}@${{ secrets.SSV_DB_HOST }}:${{ secrets.SSV_DB_PORT }}/${{ secrets.SSV_DB_DATABASE }}?sslmode=${{ secrets.SSV_DB_SSL }}"
+          DB_URL="postgresql://${{ secrets.SSV_DB_USER }}:${{ secrets.SSV_DB_PASSWORD }}@${{ vars.SSV_DB_HOST }}:${{ vars.SSV_DB_PORT }}/${{ vars.SSV_DB_DATABASE }}?sslmode=${{ vars.SSV_DB_SSL }}"
           echo "=== Migration Status ==="
           migrate -path migrations -database "$DB_URL" version
           echo ""
