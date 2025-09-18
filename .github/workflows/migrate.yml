@@ -64,10 +64,10 @@ jobs:
             cd /tmp
             if [ "$ARCH" = "aarch64" ]; then
               echo "Downloading ARM64 migrate..."
-              curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-arm64.tar.gz -o migrate.tar.gz
+              curl -L https://github.com/golang-migrate/migrate/releases/download/v4.19.0/migrate.linux-arm64.tar.gz -o migrate.tar.gz
             else
               echo "Downloading AMD64 migrate..."
-              curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz -o migrate.tar.gz
+              curl -L https://github.com/golang-migrate/migrate/releases/download/v4.19.0/migrate.linux-amd64.tar.gz -o migrate.tar.gz
             fi
 
             tar -xzf migrate.tar.gz
@@ -75,6 +75,11 @@ jobs:
             chmod +x /usr/local/bin/migrate
             rm -f migrate.tar.gz LICENSE README.md
             cd -
+          fi
+
+          if ! command -v file &> /dev/null; then
+            echo "Installing file command..."
+            apt-get update && apt-get install -y file
           fi
 
           echo "Testing migrate binary..."
