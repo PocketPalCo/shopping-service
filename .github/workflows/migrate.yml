@@ -106,8 +106,18 @@ jobs:
             echo "❌ No migration files found"
             exit 1
           fi
+          echo "=== Debug Database Configuration ==="
+          echo "DB_HOST: ${{ vars.SSV_DB_HOST }}"
+          echo "DB_PORT: ${{ vars.SSV_DB_PORT }}"
+          echo "DB_DATABASE: ${{ vars.SSV_DB_DATABASE }}"
+          echo "DB_SSL: ${{ vars.SSV_DB_SSL }}"
+          echo "DB_USER: ${{ secrets.SSV_DB_USER }}"
+          echo "DB_PASSWORD: [REDACTED - length: ${#'${{ secrets.SSV_DB_PASSWORD }}'}]"
+          echo "========================================"
+
           DB_URL="postgresql://${{ secrets.SSV_DB_USER }}:${{ secrets.SSV_DB_PASSWORD }}@${{ vars.SSV_DB_HOST }}:${{ vars.SSV_DB_PORT }}/${{ vars.SSV_DB_DATABASE }}?sslmode=${{ vars.SSV_DB_SSL }}"
           echo "Testing database connection..."
+          echo "Connection string: postgresql://${{ secrets.SSV_DB_USER }}:[REDACTED]@${{ vars.SSV_DB_HOST }}:${{ vars.SSV_DB_PORT }}/${{ vars.SSV_DB_DATABASE }}?sslmode=${{ vars.SSV_DB_SSL }}"
           if ! migrate -path migrations -database "$DB_URL" version &>/dev/null; then
             echo "❌ Cannot connect to database. Make sure PostgreSQL is running."
             exit 1
