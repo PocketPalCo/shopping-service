@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Microsoft/cognitive-services-speech-sdk-go/audio"
@@ -112,6 +113,9 @@ func (c *Client) ProcessAudio(ctx context.Context, req STTRequest) (*STTResponse
 	}
 
 	// Try each language until we get a successful recognition
+	var lastError error
+	var failedLanguages []string
+
 	for i, lang := range languages {
 		if lang == "" {
 			continue
@@ -132,32 +136,56 @@ func (c *Client) ProcessAudio(ctx context.Context, req STTRequest) (*STTResponse
 			return result, nil
 		}
 
-		// Log the attempt if it's not the last one
-		if i < len(languages)-1 {
-			span := trace.SpanFromContext(ctx)
-			span.SetAttributes(
-				attribute.String("attempted_language", lang),
-				attribute.String("attempt_result", "no_match_trying_next"),
-			)
-		}
+		// Store the error for detailed logging
+		lastError = err
+		failedLanguages = append(failedLanguages, lang)
+
+		// Log the failed attempt with detailed error information
+		span := trace.SpanFromContext(ctx)
+		span.SetAttributes(
+			attribute.String("attempted_language", lang),
+			attribute.String("attempt_result", "failed"),
+			attribute.String("attempt_error", err.Error()),
+		)
+
+		// Log detailed failure information
+		slog.Debug("STT language attempt failed",
+			"language", lang,
+			"error", err,
+			"audio_size_bytes", len(req.AudioData),
+			"session_id", req.SessionID,
+			"component", "stt_processing")
 	}
 
-	// All languages failed, return error
+	// All languages failed, return error with detailed information
 	duration := time.Since(startTime)
 	errorAttrs := append(attrs,
 		attribute.String("outcome", "failed"),
 		attribute.String("error_type", "recognition_failed"),
 		attribute.String("error_category", "no_languages_matched"),
+		attribute.StringSlice("failed_languages", failedLanguages),
+		attribute.String("last_error", lastError.Error()),
 	)
 	c.processRequestErrors.Add(ctx, 1, api.WithAttributes(errorAttrs...))
 	c.processRequestDuration.Record(ctx, duration.Seconds(), api.WithAttributes(errorAttrs...))
 
-	return nil, fmt.Errorf("speech recognition failed for all attempted languages")
+	// Enhanced error message with debugging information
+	errorMsg := fmt.Sprintf("speech recognition failed for all attempted languages %v. Last error: %v. Audio size: %d bytes, Duration: %dms",
+		failedLanguages, lastError, len(req.AudioData), duration.Milliseconds())
+
+	return nil, fmt.Errorf(errorMsg)
 }
 
 func (c *Client) processAudioWithLanguage(ctx context.Context, req STTRequest, language string) (*STTResponse, error) {
 	ctx, span := tracer.Start(ctx, "stt.ProcessAudio")
 	defer span.End()
+
+	// Debug log for each language attempt
+	slog.Debug("STT processing attempt",
+		"language", language,
+		"audio_size_bytes", len(req.AudioData),
+		"session_id", req.SessionID,
+		"component", "stt_processing")
 
 	// Set span attributes
 	span.SetAttributes(
@@ -166,6 +194,7 @@ func (c *Client) processAudioWithLanguage(ctx context.Context, req STTRequest, l
 		attribute.String("language", req.Language),
 		attribute.String("target_language", req.TargetLanguage),
 		attribute.Int("audio_size_bytes", len(req.AudioData)),
+		attribute.String("attempting_language", language),
 	)
 
 	start := time.Now()
@@ -289,12 +318,23 @@ func (c *Client) processAudioWithLanguage(ctx context.Context, req STTRequest, l
 			reasonStr = fmt.Sprintf("Unknown(%d) - Possible audio format or configuration issue", result.Reason)
 		}
 
+		// Enhanced debug logging
+		slog.Warn("STT recognition failed",
+			"language", language,
+			"reason", reasonStr,
+			"result_text", result.Text,
+			"audio_size_bytes", len(req.AudioData),
+			"duration_ms", duration.Milliseconds(),
+			"session_id", req.SessionID,
+			"component", "stt_processing")
+
 		err := fmt.Errorf("speech recognition failed: %s", reasonStr)
 		span.RecordError(err)
 		span.SetAttributes(
 			attribute.String("result_reason", reasonStr),
 			attribute.String("result_text", result.Text),
-			attribute.String("language", req.Language),
+			attribute.String("language", language),
+			attribute.String("requested_language", req.Language),
 		)
 
 		if telemetry.TelegramMessagesTotal != nil {
@@ -312,6 +352,15 @@ func (c *Client) processAudioWithLanguage(ctx context.Context, req STTRequest, l
 
 	recognizedText := result.Text
 	detectedLanguage := language // Use the language we set for recognition
+
+	// Success debug logging
+	slog.Debug("STT recognition successful",
+		"language", language,
+		"text", recognizedText,
+		"audio_size_bytes", len(req.AudioData),
+		"duration_ms", duration.Milliseconds(),
+		"session_id", req.SessionID,
+		"component", "stt_processing")
 
 	// Build response
 	sttResp := &STTResponse{

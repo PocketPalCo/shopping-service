@@ -477,11 +477,18 @@ func (h *CoreMessageHandler) HandleAudioMessage(ctx context.Context, message *tg
 
 			h.logger.Error("❌ Failed to transcribe audio",
 				"error", err,
+				"error_details", err.Error(),
 				"user_id", user.TelegramID,
 				"session_id", sessionID,
 				"audio_type", audioType,
 				"audio_size_bytes", len(audioData),
-				"step", "stt_error")
+				"audio_duration_seconds", duration,
+				"audio_mime_type", mimeType,
+				"filename", fileName,
+				"user_locale", user.User.Locale,
+				"processing_time_ms", time.Since(startTime).Milliseconds(),
+				"step", "stt_error",
+				"component", "audio_processing")
 
 			// Send error message to user
 			errorMsg := "❌ Sorry, I couldn't understand your voice message. Please try again or send a text message."
