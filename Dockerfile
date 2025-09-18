@@ -32,23 +32,24 @@ ENV PATH="${GOPATH}/bin:${PATH}"
 # Download and install Azure Speech SDK C++ library
 ENV SPEECHSDK_ROOT="/usr/local/SpeechSDK"
 RUN mkdir -p "$SPEECHSDK_ROOT" && \
-    ARCH=$(uname -m) && \
-    if [ "$ARCH" = "aarch64" ]; then \
-        echo "ARM64 detected - using x64 Speech SDK as fallback" && \
-        wget -O SpeechSDK-Linux.tar.gz https://aka.ms/csspeech/linuxbinary && \
-        export LIBDIR="x64"; \
-    else \
-        wget -O SpeechSDK-Linux.tar.gz https://aka.ms/csspeech/linuxbinary && \
-        export LIBDIR="x64"; \
-    fi && \
+    wget -O SpeechSDK-Linux.tar.gz https://aka.ms/csspeech/linuxbinary && \
     tar --strip 1 -xzf SpeechSDK-Linux.tar.gz -C "$SPEECHSDK_ROOT" && \
-    rm SpeechSDK-Linux.tar.gz && \
-    echo "SPEECHSDK_LIBDIR=$LIBDIR" >> /etc/environment
+    rm SpeechSDK-Linux.tar.gz
 
-# Set environment variables for Speech SDK
+# Set environment variables for Speech SDK with architecture detection
 ENV CGO_CFLAGS="-I$SPEECHSDK_ROOT/include/c_api"
-ENV CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/x64 -lMicrosoft.CognitiveServices.Speech.core"
-ENV LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/x64:$LD_LIBRARY_PATH"
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then \
+        export CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/arm64 -lMicrosoft.CognitiveServices.Speech.core" && \
+        export LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/arm64:$LD_LIBRARY_PATH" && \
+        echo "CGO_LDFLAGS=-L$SPEECHSDK_ROOT/lib/arm64 -lMicrosoft.CognitiveServices.Speech.core" > /tmp/build_env && \
+        echo "LD_LIBRARY_PATH=$SPEECHSDK_ROOT/lib/arm64:$LD_LIBRARY_PATH" >> /tmp/build_env; \
+    else \
+        export CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/x64 -lMicrosoft.CognitiveServices.Speech.core" && \
+        export LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/x64:$LD_LIBRARY_PATH" && \
+        echo "CGO_LDFLAGS=-L$SPEECHSDK_ROOT/lib/x64 -lMicrosoft.CognitiveServices.Speech.core" > /tmp/build_env && \
+        echo "LD_LIBRARY_PATH=$SPEECHSDK_ROOT/lib/x64:$LD_LIBRARY_PATH" >> /tmp/build_env; \
+    fi
 
 WORKDIR /app
 
@@ -60,7 +61,7 @@ RUN go mod download
 COPY . .
 
 # Build the application with CGO enabled for Speech SDK
-RUN CGO_ENABLED=1 GOOS=linux go build -o shopping-service ./cmd
+RUN . /tmp/build_env && CGO_ENABLED=1 GOOS=linux go build -o shopping-service ./cmd
 
 # Runtime stage
 FROM debian:bullseye-slim
@@ -73,9 +74,21 @@ RUN apt-get update && apt-get install -y \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Speech SDK libraries from builder (x64 as fallback for ARM64)
-COPY --from=builder /usr/local/SpeechSDK/lib/x64 /usr/local/lib/
-RUN echo "/usr/local/lib" > /etc/ld.so.conf.d/speechsdk.conf && ldconfig
+# Copy Speech SDK libraries from builder (architecture specific)
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then \
+        echo "Using ARM64 libraries"; \
+    else \
+        echo "Using x64 libraries"; \
+    fi
+COPY --from=builder /usr/local/SpeechSDK/lib /usr/local/SpeechSDK/lib
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then \
+        cp -r /usr/local/SpeechSDK/lib/arm64/* /usr/local/lib/; \
+    else \
+        cp -r /usr/local/SpeechSDK/lib/x64/* /usr/local/lib/; \
+    fi && \
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/speechsdk.conf && ldconfig
 
 RUN mkdir /app
 
