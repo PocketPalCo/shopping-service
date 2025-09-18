@@ -130,3 +130,21 @@ See `.env.example` for all available configuration options.
 - Add to memory: Use localization for everithing
 - to memizize all prompts should be in separate files
 - to memorize: When add new command - also need add it to button menu
+
+## Database Deployment & Observability
+
+### GitHub Workflow Database Deployment
+- GitHub workflow deploys PostgreSQL and Redis to Hetzner server (5.75.253.166)
+- Uses existing `HETZNER_SERVER_IP` and `HETZNER_SSH_PRIVATE_KEY` variables
+- Database volumes stored on Hetzner volume `/mnt/HC_Volume_103472708/`
+- Workflow uses existing SSV_ prefixed secrets/variables for database configuration
+- Manual deployment only (no automatic CI database deployment)
+- Repository already has all SSV_ prefixed variables configured - reuse instead of duplicating
+
+### Observability Architecture
+- **Conditional Logging**: `SSV_OTLP_LOGS_ENABLED=false` (default) enables Promtail collection
+- **Architecture Separation**: Promtail handles logs, OTEL handles metrics/traces only
+- **JSON Logging**: Outputs to stdout for container log collection when OTLP logs disabled
+- **OTLP Logging**: Available when `SSV_OTLP_LOGS_ENABLED=true` for direct OTEL collection
+- **Implementation**: `pkg/logger/otlp_logger.go` contains both `NewOTLPOnlyLogger` and `NewJSONLogger`
+- **Configuration**: Conditional logger initialization in `cmd/main.go` based on `cfg.OtlpLogsEnabled`

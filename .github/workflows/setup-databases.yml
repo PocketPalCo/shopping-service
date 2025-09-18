@@ -24,47 +24,47 @@ jobs:
     - name: Setup SSH key
       run: |
         mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        echo "${{ secrets.HETZNER_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H ${{ vars.SERVER_HOST }} >> ~/.ssh/known_hosts
+        ssh-keyscan -H ${{ vars.HETZNER_SERVER_IP }} >> ~/.ssh/known_hosts
 
     - name: Deploy docker-compose files to server
       run: |
-        scp docker-compose.db.yml ${{ vars.SSH_USER }}@${{ vars.SERVER_HOST }}:/tmp/
-        scp .env.example ${{ vars.SSH_USER }}@${{ vars.SERVER_HOST }}:/tmp/
+        scp docker-compose.db.yml root@${{ vars.HETZNER_SERVER_IP }}:/tmp/
+        scp .env.example root@${{ vars.HETZNER_SERVER_IP }}:/tmp/
 
     - name: Setup environment on server
       run: |
-        ssh ${{ vars.SSH_USER }}@${{ vars.SERVER_HOST }} '
+        ssh root@${{ vars.HETZNER_SERVER_IP }} '
           cd /tmp
           # Copy example env if .env doesn't exist
           if [ ! -f .env ]; then
             cp .env.example .env
           fi
 
-          # Set database configuration from secrets
-          echo "SSV_DB_USER=${{ secrets.DB_USER }}" >> .env
-          echo "SSV_DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-          echo "SSV_DB_DATABASE=${{ vars.DB_NAME }}" >> .env
-          echo "SSV_DB_PORT=${{ vars.DB_PORT }}" >> .env
-          echo "SSV_REDIS_PORT=${{ vars.REDIS_PORT }}" >> .env
-          echo "SSV_REDIS_PASS=${{ secrets.REDIS_PASSWORD }}" >> .env
+          # Set database configuration using existing SSV_ variables
+          echo "SSV_DB_USER=${{ secrets.SSV_DB_USER }}" >> .env
+          echo "SSV_DB_PASSWORD=${{ secrets.SSV_DB_PASSWORD }}" >> .env
+          echo "SSV_DB_DATABASE=${{ vars.SSV_DB_DATABASE }}" >> .env
+          echo "SSV_DB_PORT=${{ vars.SSV_DB_PORT }}" >> .env
+          echo "SSV_REDIS_PORT=${{ vars.SSV_REDIS_PORT }}" >> .env
+          echo "SSV_REDIS_PASS=${{ secrets.SSV_REDIS_PASS }}" >> .env
         '
 
 
     - name: Start databases
       if: github.event.inputs.action == 'up' || github.event.inputs.action == ''
       run: |
-        ssh ${{ vars.SSH_USER }}@${{ vars.SERVER_HOST }} '
+        ssh root@${{ vars.HETZNER_SERVER_IP }} '
           cd /tmp
           docker compose -f docker-compose.db.yml up -d
 
           # Wait for databases to be ready
           echo "Waiting for PostgreSQL to be ready..."
-          timeout 60 bash -c "until docker compose -f docker-compose.db.yml exec -T postgres pg_isready -U ${{ secrets.DB_USER }}; do sleep 2; done"
+          timeout 60 bash -c "until docker compose -f docker-compose.db.yml exec -T postgres pg_isready -U ${{ secrets.SSV_DB_USER }}; do sleep 2; done"
 
           echo "Waiting for Redis to be ready..."
-          timeout 60 bash -c "until docker compose -f docker-compose.db.yml exec -T redis redis-cli -a ${{ secrets.REDIS_PASSWORD }} ping; do sleep 2; done"
+          timeout 60 bash -c "until docker compose -f docker-compose.db.yml exec -T redis redis-cli -a ${{ secrets.SSV_REDIS_PASS }} ping; do sleep 2; done"
 
           echo "✅ Databases are ready!"
         '
@@ -72,7 +72,7 @@ jobs:
     - name: Stop databases
       if: github.event.inputs.action == 'down'
       run: |
-        ssh ${{ vars.SSH_USER }}@${{ vars.SERVER_HOST }} '
+        ssh root@${{ vars.HETZNER_SERVER_IP }} '
           cd /tmp
           docker compose -f docker-compose.db.yml down -v
           echo "✅ Databases stopped and volumes removed!"
@@ -81,38 +81,38 @@ jobs:
     - name: Restart databases
       if: github.event.inputs.action == 'restart'
       run: |
-        ssh ${{ vars.SSH_USER }}@${{ vars.SERVER_HOST }} '
+        ssh root@${{ vars.HETZNER_SERVER_IP }} '
           cd /tmp
           docker compose -f docker-compose.db.yml restart
 
           # Wait for databases to be ready after restart
           echo "Waiting for PostgreSQL to be ready..."
-          timeout 60 bash -c "until docker compose -f docker-compose.db.yml exec -T postgres pg_isready -U ${{ secrets.DB_USER }}; do sleep 2; done"
+          timeout 60 bash -c "until docker compose -f docker-compose.db.yml exec -T postgres pg_isready -U ${{ secrets.SSV_DB_USER }}; do sleep 2; done"
 
           echo "Waiting for Redis to be ready..."
-          timeout 60 bash -c "until docker compose -f docker-compose.db.yml exec -T redis redis-cli -a ${{ secrets.REDIS_PASSWORD }} ping; do sleep 2; done"
+          timeout 60 bash -c "until docker compose -f docker-compose.db.yml exec -T redis redis-cli -a ${{ secrets.SSV_REDIS_PASS }} ping; do sleep 2; done"
 
           echo "✅ Databases restarted!"
         '
 
     - name: Show database status
       run: |
-        ssh ${{ vars.SSH_USER }}@${{ vars.SERVER_HOST }} '
+        ssh root@${{ vars.HETZNER_SERVER_IP }} '
           cd /tmp
           echo "=== Database Container Status ==="
           docker compose -f docker-compose.db.yml ps
 
           echo -e "\n=== PostgreSQL Connection Test ==="
-          docker compose -f docker-compose.db.yml exec -T postgres psql -U ${{ secrets.DB_USER }} -d ${{ vars.DB_NAME }} -c "SELECT version();" || echo "❌ PostgreSQL connection failed"
+          docker compose -f docker-compose.db.yml exec -T postgres psql -U ${{ secrets.SSV_DB_USER }} -d ${{ vars.SSV_DB_DATABASE }} -c "SELECT version();" || echo "❌ PostgreSQL connection failed"
 
           echo -e "\n=== Redis Connection Test ==="
-          docker compose -f docker-compose.db.yml exec -T redis redis-cli -a ${{ secrets.REDIS_PASSWORD }} ping || echo "❌ Redis connection failed"
+          docker compose -f docker-compose.db.yml exec -T redis redis-cli -a ${{ secrets.SSV_REDIS_PASS }} ping || echo "❌ Redis connection failed"
         '
 
     - name: Show logs on failure
       if: failure()
       run: |
-        ssh ${{ vars.SSH_USER }}@${{ vars.SERVER_HOST }} '
+        ssh root@${{ vars.HETZNER_SERVER_IP }} '
           cd /tmp
           echo "=== PostgreSQL Logs ==="
           docker compose -f docker-compose.db.yml logs postgres
