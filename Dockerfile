@@ -12,11 +12,17 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Go 1.25.1
+# Install Go 1.25.1 for ARM64
 ENV GO_VERSION=1.25.1
-RUN wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz && \
-    tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz && \
-    rm go${GO_VERSION}.linux-amd64.tar.gz
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then \
+        GOARCH="arm64"; \
+    else \
+        GOARCH="amd64"; \
+    fi && \
+    wget https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH}.tar.gz && \
+    tar -C /usr/local -xzf go${GO_VERSION}.linux-${GOARCH}.tar.gz && \
+    rm go${GO_VERSION}.linux-${GOARCH}.tar.gz
 
 # Set Go environment
 ENV PATH="/usr/local/go/bin:${PATH}"
@@ -26,14 +32,22 @@ ENV PATH="${GOPATH}/bin:${PATH}"
 # Download and install Azure Speech SDK C++ library
 ENV SPEECHSDK_ROOT="/usr/local/SpeechSDK"
 RUN mkdir -p "$SPEECHSDK_ROOT" && \
-    wget -O SpeechSDK-Linux.tar.gz https://aka.ms/csspeech/linuxbinary && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then \
+        wget -O SpeechSDK-Linux.tar.gz https://aka.ms/csspeech/linuxbinary-arm64 && \
+        export LIBDIR="arm64"; \
+    else \
+        wget -O SpeechSDK-Linux.tar.gz https://aka.ms/csspeech/linuxbinary && \
+        export LIBDIR="x64"; \
+    fi && \
     tar --strip 1 -xzf SpeechSDK-Linux.tar.gz -C "$SPEECHSDK_ROOT" && \
-    rm SpeechSDK-Linux.tar.gz
+    rm SpeechSDK-Linux.tar.gz && \
+    echo "SPEECHSDK_LIBDIR=$LIBDIR" >> /etc/environment
 
 # Set environment variables for Speech SDK
 ENV CGO_CFLAGS="-I$SPEECHSDK_ROOT/include/c_api"
-ENV CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/x64 -lMicrosoft.CognitiveServices.Speech.core"
-ENV LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/x64:$LD_LIBRARY_PATH"
+ENV CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/arm64 -lMicrosoft.CognitiveServices.Speech.core"
+ENV LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/arm64:$LD_LIBRARY_PATH"
 
 WORKDIR /app
 
@@ -58,8 +72,8 @@ RUN apt-get update && apt-get install -y \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Speech SDK libraries from builder
-COPY --from=builder /usr/local/SpeechSDK/lib/x64 /usr/local/lib/
+# Copy Speech SDK libraries from builder (ARM64)
+COPY --from=builder /usr/local/SpeechSDK/lib/arm64 /usr/local/lib/
 RUN echo "/usr/local/lib" > /etc/ld.so.conf.d/speechsdk.conf && ldconfig
 
 RUN mkdir /app
