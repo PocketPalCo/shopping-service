@@ -37,7 +37,7 @@ jobs:
 
     - name: Setup environment on server
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} '
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /tmp
           # Copy example env if .env doesn't exist
           if [ ! -f .env ]; then
@@ -51,13 +51,13 @@ jobs:
           echo "SSV_DB_PORT=${{ vars.SSV_DB_PORT }}" >> .env
           echo "SSV_REDIS_PORT=${{ vars.SSV_REDIS_PORT }}" >> .env
           echo "SSV_REDIS_PASS=${{ secrets.SSV_REDIS_PASS }}" >> .env
-        '
+        EOF
 
 
     - name: Start databases
       if: github.event.inputs.action == 'up' || github.event.inputs.action == ''
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} '
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /tmp
           docker compose -f docker-compose.db.yml up -d
 
@@ -69,21 +69,21 @@ jobs:
           timeout 60 bash -c "until docker compose -f docker-compose.db.yml exec -T redis redis-cli -a ${{ secrets.SSV_REDIS_PASS }} ping; do sleep 2; done"
 
           echo "✅ Databases are ready!"
-        '
+        EOF
 
     - name: Stop databases
       if: github.event.inputs.action == 'down'
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} '
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /tmp
           docker compose -f docker-compose.db.yml down -v
           echo "✅ Databases stopped and volumes removed!"
-        '
+        EOF
 
     - name: Restart databases
       if: github.event.inputs.action == 'restart'
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} '
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /tmp
           docker compose -f docker-compose.db.yml restart
 
@@ -95,11 +95,11 @@ jobs:
           timeout 60 bash -c "until docker compose -f docker-compose.db.yml exec -T redis redis-cli -a ${{ secrets.SSV_REDIS_PASS }} ping; do sleep 2; done"
 
           echo "✅ Databases restarted!"
-        '
+        EOF
 
     - name: Show database status
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} '
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /tmp
           echo "=== Database Container Status ==="
           docker compose -f docker-compose.db.yml ps
@@ -109,16 +109,16 @@ jobs:
 
           echo -e "\n=== Redis Connection Test ==="
           docker compose -f docker-compose.db.yml exec -T redis redis-cli -a ${{ secrets.SSV_REDIS_PASS }} ping || echo "❌ Redis connection failed"
-        '
+        EOF
 
     - name: Show logs on failure
       if: failure()
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} '
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
           cd /tmp
           echo "=== PostgreSQL Logs ==="
           docker compose -f docker-compose.db.yml logs postgres
 
           echo -e "\n=== Redis Logs ==="
           docker compose -f docker-compose.db.yml logs redis
-        '
+        EOF
