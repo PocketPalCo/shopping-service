@@ -94,6 +94,10 @@ WORKDIR /app
 # Copy binary from builder stage
 COPY --from=builder /app/shopping-service .
 
+# Copy templates and prompts from builder stage
+COPY --from=builder /app/internal/core/telegram/templates ./internal/core/telegram/templates
+COPY --from=builder /app/prompts ./prompts
+
 # Create logs directory
 RUN mkdir -p logs
 
