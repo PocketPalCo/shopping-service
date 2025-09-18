@@ -39,4 +39,4 @@ services:
 networks:
   shopping-network:
     name: shopping-network
-    driver: bridge
+    external: true
