@@ -28,7 +28,9 @@ on:
 jobs:
   migrate:
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'production' }}
+    environment:
+      name: ${{ github.event.inputs.environment || 'production' }}
+      url: ${{ steps.migrate.outputs.url }}
 
     steps:
     - name: Checkout code
@@ -111,16 +113,23 @@ jobs:
           echo "DB_PORT: ${{ vars.SSV_DB_PORT }}"
           echo "DB_DATABASE: ${{ vars.SSV_DB_DATABASE }}"
           echo "DB_SSL: ${{ vars.SSV_DB_SSL }}"
-          echo "DB_USER: ${{ secrets.SSV_DB_USER }}"
-          echo "DB_PASSWORD: [REDACTED - length: ${#'${{ secrets.SSV_DB_PASSWORD }}'}]"
+          echo "DB_USER: [REDACTED]"
+          echo "DB_PASSWORD: [REDACTED]"
           echo "========================================"
 
           DB_URL="postgresql://${{ secrets.SSV_DB_USER }}:${{ secrets.SSV_DB_PASSWORD }}@${{ vars.SSV_DB_HOST }}:${{ vars.SSV_DB_PORT }}/${{ vars.SSV_DB_DATABASE }}?sslmode=${{ vars.SSV_DB_SSL }}"
           echo "Testing database connection..."
           echo "Connection string: postgresql://${{ secrets.SSV_DB_USER }}:[REDACTED]@${{ vars.SSV_DB_HOST }}:${{ vars.SSV_DB_PORT }}/${{ vars.SSV_DB_DATABASE }}?sslmode=${{ vars.SSV_DB_SSL }}"
-          if ! migrate -path migrations -database "$DB_URL" version &>/dev/null; then
-            echo "❌ Cannot connect to database. Make sure PostgreSQL is running."
+
+          VERSION_OUTPUT=$(migrate -path migrations -database "$DB_URL" version 2>&1)
+          if echo "$VERSION_OUTPUT" | grep -q "no migration"; then
+            echo "✅ Database connected successfully (no migrations table yet - this is normal for first run)"
+          elif echo "$VERSION_OUTPUT" | grep -q "error"; then
+            echo "❌ Cannot connect to database: $VERSION_OUTPUT"
             exit 1
+          else
+            echo "✅ Database connected successfully"
+            echo "Current migration version: $VERSION_OUTPUT"
           fi
           echo "Current migration version:"
           migrate -path migrations -database "$DB_URL" version
