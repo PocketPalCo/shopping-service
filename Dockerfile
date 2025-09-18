@@ -36,20 +36,8 @@ RUN mkdir -p "$SPEECHSDK_ROOT" && \
     tar --strip 1 -xzf SpeechSDK-Linux.tar.gz -C "$SPEECHSDK_ROOT" && \
     rm SpeechSDK-Linux.tar.gz
 
-# Set environment variables for Speech SDK with architecture detection
+# Set environment variables for Speech SDK
 ENV CGO_CFLAGS="-I$SPEECHSDK_ROOT/include/c_api"
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "aarch64" ]; then \
-        export CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/arm64 -lMicrosoft.CognitiveServices.Speech.core" && \
-        export LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/arm64:$LD_LIBRARY_PATH" && \
-        echo "CGO_LDFLAGS=-L$SPEECHSDK_ROOT/lib/arm64 -lMicrosoft.CognitiveServices.Speech.core" > /tmp/build_env && \
-        echo "LD_LIBRARY_PATH=$SPEECHSDK_ROOT/lib/arm64:$LD_LIBRARY_PATH" >> /tmp/build_env; \
-    else \
-        export CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/x64 -lMicrosoft.CognitiveServices.Speech.core" && \
-        export LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/x64:$LD_LIBRARY_PATH" && \
-        echo "CGO_LDFLAGS=-L$SPEECHSDK_ROOT/lib/x64 -lMicrosoft.CognitiveServices.Speech.core" > /tmp/build_env && \
-        echo "LD_LIBRARY_PATH=$SPEECHSDK_ROOT/lib/x64:$LD_LIBRARY_PATH" >> /tmp/build_env; \
-    fi
 
 WORKDIR /app
 
@@ -61,7 +49,16 @@ RUN go mod download
 COPY . .
 
 # Build the application with CGO enabled for Speech SDK
-RUN . /tmp/build_env && CGO_ENABLED=1 GOOS=linux go build -o shopping-service ./cmd
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then \
+        CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/arm64 -lMicrosoft.CognitiveServices.Speech.core" \
+        LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/arm64:$LD_LIBRARY_PATH" \
+        CGO_ENABLED=1 GOOS=linux go build -o shopping-service ./cmd; \
+    else \
+        CGO_LDFLAGS="-L$SPEECHSDK_ROOT/lib/x64 -lMicrosoft.CognitiveServices.Speech.core" \
+        LD_LIBRARY_PATH="$SPEECHSDK_ROOT/lib/x64:$LD_LIBRARY_PATH" \
+        CGO_ENABLED=1 GOOS=linux go build -o shopping-service ./cmd; \
+    fi
 
 # Runtime stage
 FROM debian:bullseye-slim
