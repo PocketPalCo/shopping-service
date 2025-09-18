@@ -84,6 +84,10 @@ The service uses a configuration-driven approach with extensive environment vari
 - `make mock` - Generate mocks using go generate
 - `make vet` - Run comprehensive linting (go vet, gosec, govulncheck, staticcheck)
 
+### Building
+- `./dev-with-azure-speech.sh go build -o shopping-service ./cmd/main.go` - Build with Azure Speech SDK environment
+- `./dev-with-azure-speech.sh go build -o /dev/null ./...` - Build all packages for testing
+
 ### Database
 - `docker-compose up` - Start PostgreSQL database (default: postgres/postgres@localhost:5432/pocket-pal)
 
