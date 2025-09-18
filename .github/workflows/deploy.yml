@@ -86,88 +86,91 @@ jobs:
 
     - name: Create production environment file
       run: |
-        ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
-          cd /opt/shopping-service
-          cat > .env << 'ENV_EOF'
-          SSV_ENVIRONMENT=${{ vars.SSV_ENVIRONMENT || 'production' }}
-          SSV_SERVER_BIND_ADDR=${{ vars.SSV_SERVER_BIND_ADDR || '0.0.0.0:3009' }}
-          SSV_SERVER_READ_TIMEOUT=${{ vars.SSV_SERVER_READ_TIMEOUT || '60' }}
-          SSV_LOG_FORMAT=${{ vars.SSV_LOG_FORMAT || 'json' }}
-          SSV_LOG_LEVEL=${{ vars.SSV_LOG_LEVEL || 'info' }}
-          SSV_RATE_LIMIT_MAX=${{ vars.SSV_RATE_LIMIT_MAX || '1000' }}
-          SSV_RATE_LIMIT_WINDOW=${{ vars.SSV_RATE_LIMIT_WINDOW || '60' }}
-          SSV_DB_HOST=${{ vars.SSV_DB_HOST }}
-          SSV_DB_PORT=${{ vars.SSV_DB_PORT }}
-          SSV_DB_SSL=${{ vars.SSV_DB_SSL }}
-          SSV_DB_USER=${{ vars.SSV_DB_USER }}
-          SSV_DB_PASSWORD=${{ secrets.SSV_DB_PASSWORD }}
-          SSV_DB_DATABASE=${{ vars.SSV_DB_DATABASE }}
-          SSV_DB_MAX_CONNECTIONS=${{ vars.SSV_DB_MAX_CONNECTIONS }}
-          SSV_REDIS_HOST=${{ vars.SSV_REDIS_HOST }}
-          SSV_REDIS_PORT=${{ vars.SSV_REDIS_PORT }}
-          SSV_REDIS_DB=${{ vars.SSV_REDIS_DB }}
-          SSV_REDIS_USER=${{ vars.SSV_REDIS_USER }}
-          SSV_REDIS_PASS=${{ secrets.SSV_REDIS_PASS }}
-          SSV_OTLP_ENDPOINT=${{ vars.SSV_OTLP_ENDPOINT }}
-          SSV_JAEGER_ENDPOINT=${{ vars.SSV_JAEGER_ENDPOINT }}
-          SSV_TELEGRAM_BOT_TOKEN=${{ secrets.SSV_TELEGRAM_BOT_TOKEN }}
-          SSV_TELEGRAM_DEBUG=${{ vars.SSV_TELEGRAM_DEBUG }}
-          SSV_TELEGRAM_ADMINS=${{ secrets.SSV_TELEGRAM_ADMINS }}
-          SSV_OPENAI_API_KEY=${{ secrets.SSV_OPENAI_API_KEY }}
-          SSV_OPENAI_MODEL=${{ vars.SSV_OPENAI_MODEL }}
-          SSV_OPENAI_BASE_URL=${{ vars.SSV_OPENAI_BASE_URL }}
-          SSV_OPENAI_MAX_TOKENS=${{ vars.SSV_OPENAI_MAX_TOKENS }}
-          SSV_OPENAI_TEMPERATURE=${{ vars.SSV_OPENAI_TEMPERATURE }}
-          SSV_AZURE_SPEECH_KEY=${{ secrets.SSV_AZURE_SPEECH_KEY }}
-          SSV_AZURE_SPEECH_REGION=${{ vars.SSV_AZURE_SPEECH_REGION }}
-          SSV_CLOUD_PROVIDER=${{ vars.SSV_CLOUD_PROVIDER }}
-          SSV_AZURE_STORAGE_CONNECTION_STRING=${{ secrets.SSV_AZURE_STORAGE_CONNECTION_STRING }}
-          SSV_AZURE_STORAGE_CONTAINER_NAME=${{ vars.SSV_AZURE_STORAGE_CONTAINER_NAME }}
-          SSV_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=${{ secrets.SSV_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT }}
-          SSV_AZURE_DOCUMENT_INTELLIGENCE_API_KEY=${{ secrets.SSV_AZURE_DOCUMENT_INTELLIGENCE_API_KEY }}
-          SSV_AZURE_DOCUMENT_INTELLIGENCE_API_VERSION=${{ vars.SSV_AZURE_DOCUMENT_INTELLIGENCE_API_VERSION }}
-          SSV_AZURE_DOCUMENT_INTELLIGENCE_RECEIPT_MODEL=${{ vars.SSV_AZURE_DOCUMENT_INTELLIGENCE_RECEIPT_MODEL }}
-          ENV_EOF
+        ssh root@${{ secrets.HETZNER_SERVER_IP }} "cd /opt/shopping-service && cat > .env" << 'EOF'
+        SSV_ENVIRONMENT=${{ vars.SSV_ENVIRONMENT || 'production' }}
+        SSV_SERVER_BIND_ADDR=${{ vars.SSV_SERVER_BIND_ADDR || '0.0.0.0:3009' }}
+        SSV_SERVER_READ_TIMEOUT=${{ vars.SSV_SERVER_READ_TIMEOUT || '60' }}
+        SSV_LOG_FORMAT=${{ vars.SSV_LOG_FORMAT || 'json' }}
+        SSV_LOG_LEVEL=${{ vars.SSV_LOG_LEVEL || 'info' }}
+        SSV_RATE_LIMIT_MAX=${{ vars.SSV_RATE_LIMIT_MAX || '1000' }}
+        SSV_RATE_LIMIT_WINDOW=${{ vars.SSV_RATE_LIMIT_WINDOW || '60' }}
+        SSV_DB_HOST=${{ vars.SSV_DB_HOST }}
+        SSV_DB_PORT=${{ vars.SSV_DB_PORT }}
+        SSV_DB_SSL=${{ vars.SSV_DB_SSL }}
+        SSV_DB_USER=${{ vars.SSV_DB_USER }}
+        SSV_DB_PASSWORD=${{ secrets.SSV_DB_PASSWORD }}
+        SSV_DB_DATABASE=${{ vars.SSV_DB_DATABASE }}
+        SSV_DB_MAX_CONNECTIONS=${{ vars.SSV_DB_MAX_CONNECTIONS }}
+        SSV_REDIS_HOST=${{ vars.SSV_REDIS_HOST }}
+        SSV_REDIS_PORT=${{ vars.SSV_REDIS_PORT }}
+        SSV_REDIS_DB=${{ vars.SSV_REDIS_DB }}
+        SSV_REDIS_USER=${{ vars.SSV_REDIS_USER }}
+        SSV_REDIS_PASS=${{ secrets.SSV_REDIS_PASS }}
+        SSV_OTLP_ENDPOINT=${{ vars.SSV_OTLP_ENDPOINT }}
+        SSV_JAEGER_ENDPOINT=${{ vars.SSV_JAEGER_ENDPOINT }}
+        SSV_TELEGRAM_BOT_TOKEN=${{ secrets.SSV_TELEGRAM_BOT_TOKEN }}
+        SSV_TELEGRAM_DEBUG=${{ vars.SSV_TELEGRAM_DEBUG }}
+        SSV_TELEGRAM_ADMINS=${{ secrets.SSV_TELEGRAM_ADMINS }}
+        SSV_OPENAI_API_KEY=${{ secrets.SSV_OPENAI_API_KEY }}
+        SSV_OPENAI_MODEL=${{ vars.SSV_OPENAI_MODEL }}
+        SSV_OPENAI_BASE_URL=${{ vars.SSV_OPENAI_BASE_URL }}
+        SSV_OPENAI_MAX_TOKENS=${{ vars.SSV_OPENAI_MAX_TOKENS }}
+        SSV_OPENAI_TEMPERATURE=${{ vars.SSV_OPENAI_TEMPERATURE }}
+        SSV_AZURE_SPEECH_KEY=${{ secrets.SSV_AZURE_SPEECH_KEY }}
+        SSV_AZURE_SPEECH_REGION=${{ vars.SSV_AZURE_SPEECH_REGION }}
+        SSV_CLOUD_PROVIDER=${{ vars.SSV_CLOUD_PROVIDER }}
+        SSV_AZURE_STORAGE_CONNECTION_STRING=${{ secrets.SSV_AZURE_STORAGE_CONNECTION_STRING }}
+        SSV_AZURE_STORAGE_CONTAINER_NAME=${{ vars.SSV_AZURE_STORAGE_CONTAINER_NAME }}
+        SSV_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=${{ secrets.SSV_AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT }}
+        SSV_AZURE_DOCUMENT_INTELLIGENCE_API_KEY=${{ secrets.SSV_AZURE_DOCUMENT_INTELLIGENCE_API_KEY }}
+        SSV_AZURE_DOCUMENT_INTELLIGENCE_API_VERSION=${{ vars.SSV_AZURE_DOCUMENT_INTELLIGENCE_API_VERSION }}
+        SSV_AZURE_DOCUMENT_INTELLIGENCE_RECEIPT_MODEL=${{ vars.SSV_AZURE_DOCUMENT_INTELLIGENCE_RECEIPT_MODEL }}
         EOF
 
     - name: Deploy shopping service
       run: |
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
+          set -e
           cd /opt/shopping-service
-          export PATH=$PATH:/usr/local/go/bin
-          echo "Building shopping service..."
-          go mod tidy
-          if go build -o shopping-service cmd/main.go; then
-            echo "✅ Build successful, restarting service..."
-            systemctl daemon-reload
-            systemctl restart shopping-service
-          else
-            echo "❌ Build failed, service not restarted"
-            exit 1
-          fi
-          echo "=== Checking service status after start ==="
-          systemctl status shopping-service --no-pager || true
+          echo "Building and deploying shopping service containers..."
+
+          # Build and deploy with docker compose
+          docker compose -f docker-compose.prod.yml build --no-cache shopping-service
+          docker compose -f docker-compose.prod.yml up -d
+
+          echo "=== Checking container status ==="
+          docker compose -f docker-compose.prod.yml ps
+
+          echo "=== Checking shopping service logs ==="
+          docker compose -f docker-compose.prod.yml logs --tail=20 shopping-service
+
+          echo "=== Health check ==="
+          sleep 30
+          curl -f http://localhost:3009/health || echo "Health check failed (service may still be starting)"
+
           echo "Deployment completed!"
         EOF
 
     - name: Verify deployment
       run: |
         ssh root@${{ secrets.HETZNER_SERVER_IP }} << 'EOF'
-          echo "=== Service Status ==="
-          systemctl status shopping-service --no-pager
+          cd /opt/shopping-service
+          echo "=== Container Status ==="
+          docker compose -f docker-compose.prod.yml ps
           echo ""
           echo "=== Health Check ==="
           sleep 10
           curl -f http://localhost:3009/health || echo "Health check failed (service may still be starting)"
           echo ""
-          echo "=== Service Logs (last 20 lines) ==="
-          journalctl -u shopping-service --no-pager -n 20
+          echo "=== Shopping Service Logs (last 30 lines) ==="
+          docker compose -f docker-compose.prod.yml logs --tail=30 shopping-service
           echo ""
           echo "=== Port Check ==="
           netstat -tlnp | grep :3009 || echo "Service not listening on port 3009"
           echo ""
-          echo "=== Process Check ==="
-          ps aux | grep shopping-service | grep -v grep || echo "Shopping service process not found"
+          echo "=== Network Connectivity Check ==="
+          docker compose -f docker-compose.prod.yml exec -T shopping-service nslookup ${{ vars.SSV_DB_HOST }} || echo "Cannot resolve database hostname"
+          docker compose -f docker-compose.prod.yml exec -T shopping-service nslookup ${{ vars.SSV_REDIS_HOST }} || echo "Cannot resolve redis hostname"
         EOF
 
     - name: Create deployment summary
