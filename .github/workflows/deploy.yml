@@ -143,35 +143,8 @@ jobs:
           echo "Building shopping service..."
           go mod tidy
           go build -o shopping-service cmd/main.go
-          cat > /etc/systemd/system/shopping-service.service << 'SERVICE_EOF'
-          [Unit]
-          Description=Shopping Service
-          After=network.target docker.service
-          Wants=docker.service
-
-          [Service]
-          Type=simple
-          User=root
-          WorkingDirectory=/opt/shopping-service
-          ExecStart=/opt/shopping-service/shopping-service
-          Restart=always
-          RestartSec=5
-          EnvironmentFile=/opt/shopping-service/.env
-
-          [Install]
-          WantedBy=multi-user.target
-          SERVICE_EOF
-          echo "=== Checking .env file (full content) ==="
-          cat .env
-          echo "=== Checking for malformed lines ==="
-          grep -n "^[^=]*$" .env || echo "No malformed lines found"
-          echo "=== Line count ==="
-          wc -l .env
-          echo "=== Checking systemd service file ==="
-          cat /etc/systemd/system/shopping-service.service
           systemctl daemon-reload
-          systemctl enable shopping-service
-          systemctl start shopping-service
+          systemctl restart shopping-service
           echo "=== Checking service status after start ==="
           systemctl status shopping-service --no-pager || true
           echo "Deployment completed!"
